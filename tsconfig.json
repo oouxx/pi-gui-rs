@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@pi-gui/pi-sdk-driver": ["./src/ambient-stub.ts"],
+      "@pi-gui/pi-sdk-driver/*": ["./src/ambient-stub.ts"],
+      "@pi-gui/session-driver": ["./src/ambient-stub.ts"],
+      "@pi-gui/session-driver/*": ["./src/ambient-stub.ts"],
+      "@pi-gui/catalogs/*": ["./src/ambient-stub.ts"]
+    }
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
