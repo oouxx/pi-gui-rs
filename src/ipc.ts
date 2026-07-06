@@ -23,6 +23,8 @@ import type {
   WorkspaceSessionTarget,
 } from "./desktop-state";
 
+export type DesktopPlatform = "darwin" | "win32" | "linux";
+
 export type DesktopNotificationPermissionStatus =
   | "granted"
   | "denied"
@@ -156,7 +158,7 @@ export const desktopCommands = {
   toggleSidebar: "toggle-sidebar",
 } as const;
 
-export function getDesktopShortcutLabel(platform: NodeJS.Platform, key: string): string {
+export function getDesktopShortcutLabel(platform: DesktopPlatform, key: string): string {
   return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
 }
 
@@ -259,8 +261,8 @@ export function getDesktopCommandFromShortcut(input: DesktopShortcutInput): PiDe
 }
 
 export interface PiDesktopApi {
-  platform: NodeJS.Platform;
-  versions: NodeJS.ProcessVersions;
+  platform: DesktopPlatform;
+  versions: Record<string, string>;
   ping(): Promise<string>;
   getState(): Promise<DesktopAppState>;
   onStateChanged(listener: PiDesktopStateListener): () => void;

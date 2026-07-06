@@ -1,235 +1,104 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::Mutex;
-
-use pi_agent_core::types::{AgentEvent, AgentMessage};
-use pi_coding_agent::core::agent_session::AgentSession;
-use pi_coding_agent::core::sdk::{create_agent_session, CreateAgentSessionOptions};
-
-// ── Types ─────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize)]
-pub struct FrontendEvent {
-    pub event_type: String,
-    pub session_id: String,
-    pub data: serde_json::Value,
-}
-
-// ── App State ─────────────────────────────────────────────────
-
-pub struct AppState {
-    pub session: Mutex<Option<AgentSession>>,
-    pub session_id: Mutex<Option<String>>,
-    pub is_streaming: AtomicBool,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        Self {
-            session: Mutex::new(None),
-            session_id: Mutex::new(None),
-            is_streaming: AtomicBool::new(false),
-        }
-    }
-}
-
-// ── Agent Event Forwarding ────────────────────────────────────
-
-fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
-    match event {
-        AgentEvent::AgentStart => ("agent_start".into(), serde_json::json!({})),
-        AgentEvent::AgentEnd { messages } => (
-            "agent_end".into(),
-            serde_json::json!({ "messages": messages }),
-        ),
-        AgentEvent::TurnStart => ("turn_start".into(), serde_json::json!({})),
-        AgentEvent::TurnEnd {
-            message,
-            tool_results,
-        } => (
-            "turn_end".into(),
-            serde_json::json!({ "message": message, "tool_results": tool_results }),
-        ),
-        AgentEvent::MessageStart { message } => {
-            ("message_start".into(), serde_json::json!({ "message": message }))
-        }
-        AgentEvent::MessageUpdate {
-            assistant_message_event,
-            ..
-        } => (
-            "message_update".into(),
-            serde_json::to_value(assistant_message_event).unwrap_or_default(),
-        ),
-        AgentEvent::MessageEnd { message } => {
-            ("message_end".into(), serde_json::json!({ "message": message }))
-        }
-        AgentEvent::ToolExecutionStart {
-            tool_call_id,
-            tool_name,
-            args,
-        } => (
-            "tool_execution_start".into(),
-            serde_json::json!({ "tool_call_id": tool_call_id, "tool_name": tool_name, "args": args }),
-        ),
-        AgentEvent::ToolExecutionUpdate {
-            tool_call_id,
-            tool_name,
-            args,
-            partial_result,
-        } => (
-            "tool_execution_update".into(),
-            serde_json::json!({
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "args": args,
-                "partial_result": partial_result,
-            }),
-        ),
-        AgentEvent::ToolExecutionEnd {
-            tool_call_id,
-            tool_name,
-            result,
-            is_error,
-        } => (
-            "tool_execution_end".into(),
-            serde_json::json!({
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "result": result,
-                "is_error": is_error,
-            }),
-        ),
-    }
-}
-
-fn build_listener(app: AppHandle, sid: String) -> Arc<dyn Fn(AgentEvent, Option<tokio::sync::watch::Receiver<bool>>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync> {
-    Arc::new(move |event: AgentEvent, _signal| {
-        let app = app.clone();
-        let sid = sid.clone();
-        Box::pin(async move {
-            let (event_type, data) = serialize_event(&event);
-            let _ = app.emit("agent-event", FrontendEvent { event_type, session_id: sid, data });
-        })
-    })
-}
-
-// ── Tauri Commands ────────────────────────────────────────────
-
-#[tauri::command]
-async fn create_session(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    cwd: String,
-) -> Result<String, String> {
-    pi_ai::providers::register_builtins::register_built_in_api_providers();
-
-    let options = CreateAgentSessionOptions {
-        cwd,
-        agent_dir: None,
-        model: None,
-        thinking_level: None,
-        scoped_models: None,
-        no_tools: None,
-        tools: None,
-        exclude_tools: None,
-        custom_prompt: None,
-        append_system_prompt: None,
-        session_name: None,
-        stream_fn: None,
-        convert_to_llm: None,
-        extension_paths: vec![],
-        enable_extensions: false,
-    };
-
-    let (mut session, _) = create_agent_session(options)
-        .await
-        .map_err(|e| format!("Failed to create agent session: {e}"))?;
-
-    let sid = uuid::Uuid::new_v4().to_string();
-    *state.session_id.lock().await = Some(sid.clone());
-
-    // Subscribe and forward events to frontend
-    session.subscribe(build_listener(app, sid.clone())).await;
-
-    *state.session.lock().await = Some(session);
-
-    Ok(sid)
-}
-
-#[tauri::command]
-async fn send_message(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    text: String,
-) -> Result<(), String> {
-    let sid = state.session_id.lock().await.clone().ok_or("No active session")?;
-
-    let mut session = state.session.lock().await.take().ok_or("No active session")?;
-    state.is_streaming.store(true, Ordering::SeqCst);
-    drop(state); // release the borrow — app.state() will re-acquire
-
-    tokio::spawn(async move {
-        // Emit user message event for immediate display
-        let _ = app.emit("agent-event", FrontendEvent {
-            event_type: "user_message".into(),
-            session_id: sid.clone(),
-            data: serde_json::json!({
-                "text": text,
-                "timestamp": chrono::Utc::now().timestamp_millis()
-            }),
-        });
-
-        // Process — this triggers agent.process() which emits events through the listener
-        session.add_user_text(&text).await;
-
-        // Store session back
-        let st = app.state::<AppState>();
-        *st.session.lock().await = Some(session);
-        st.is_streaming.store(false, Ordering::SeqCst);
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn abort(state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.session.lock().await;
-    if let Some(session) = guard.as_ref() {
-        session.abort().await;
-    }
-    state.is_streaming.store(false, Ordering::SeqCst);
-    Ok(())
-}
-
-#[tauri::command]
-async fn is_streaming(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(state.is_streaming.load(Ordering::SeqCst))
-}
-
-#[tauri::command]
-async fn get_messages(state: State<'_, AppState>) -> Result<Vec<AgentMessage>, String> {
-    let guard = state.session.lock().await;
-    match guard.as_ref() {
-        Some(session) => Ok(session.get_messages().await),
-        None => Ok(vec![]),
-    }
-}
-
-// ── App Builder ───────────────────────────────────────────────
+mod store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::new())
+        .manage(store::Store::new_with_runtime())
         .invoke_handler(tauri::generate_handler![
-            create_session,
-            send_message,
-            abort,
-            is_streaming,
-            get_messages,
+            // Core
+            store::cmds::ping,
+            store::cmds::get_state,
+            // Agent session
+            store::cmds::create_agent_session_cmd,
+            store::cmds::send_message_cmd,
+            store::cmds::abort_cmd,
+            store::cmds::is_streaming_cmd,
+            store::cmds::get_messages_cmd,
+            // Workspace
+            store::cmds::add_workspace_path,
+            store::cmds::pick_workspace,
+            store::cmds::select_workspace,
+            store::cmds::rename_workspace,
+            store::cmds::remove_workspace,
+            store::cmds::reorder_workspaces,
+            store::cmds::reorder_pinned_sessions,
+            store::cmds::open_workspace_in_finder,
+            store::cmds::create_worktree,
+            store::cmds::remove_worktree,
+            store::cmds::open_skill_in_finder,
+            store::cmds::open_extension_in_finder,
+            store::cmds::sync_current_workspace,
+            // Session
+            store::cmds::select_session,
+            store::cmds::archive_session,
+            store::cmds::unarchive_session,
+            store::cmds::set_session_pinned,
+            store::cmds::create_session,
+            store::cmds::start_thread,
+            store::cmds::fork_thread,
+            store::cmds::send_child_thread_follow_up,
+            store::cmds::set_child_supervision_loop,
+            store::cmds::cancel_current_run,
+            // View
+            store::cmds::set_active_view,
+            store::cmds::set_sidebar_collapsed,
+            store::cmds::refresh_runtime,
+            // Model
+            store::cmds::set_model_settings_scope_mode,
+            store::cmds::set_default_model,
+            store::cmds::set_default_thinking_level,
+            store::cmds::set_session_model,
+            store::cmds::set_session_thinking_level,
+            store::cmds::login_provider,
+            store::cmds::logout_provider,
+            store::cmds::set_provider_api_key,
+            store::cmds::list_custom_providers,
+            store::cmds::set_custom_provider,
+            store::cmds::delete_custom_provider,
+            store::cmds::probe_custom_provider_models,
+            store::cmds::set_enable_skill_commands,
+            store::cmds::set_scoped_model_patterns,
+            store::cmds::set_skill_enabled,
+            store::cmds::set_extension_enabled,
+            store::cmds::respond_to_host_ui_request,
+            // Runtime
+            store::cmds::get_runtime_info,
+            // Notifications
+            store::cmds::set_notification_preferences,
+            store::cmds::set_integrated_terminal_shell,
+            store::cmds::set_enable_transparency,
+            store::cmds::get_notification_permission_status,
+            store::cmds::request_notification_permission,
+            store::cmds::open_system_notification_settings,
+            // Composer
+            store::cmds::pick_composer_attachments,
+            store::cmds::add_composer_attachments,
+            store::cmds::remove_composer_attachment,
+            store::cmds::edit_queued_composer_message,
+            store::cmds::cancel_queued_composer_edit,
+            store::cmds::remove_queued_composer_message,
+            store::cmds::steer_queued_composer_message,
+            store::cmds::update_composer_draft,
+            store::cmds::submit_composer,
+            // Session tree
+            store::cmds::get_session_tree,
+            store::cmds::navigate_session_tree,
+            // Workspace files
+            store::cmds::list_workspace_files,
+            store::cmds::read_workspace_file,
+            store::cmds::get_changed_files,
+            store::cmds::get_file_diff,
+            store::cmds::stage_file,
+            // Window
+            store::cmds::toggle_window_maximize,
+            store::cmds::open_external,
+            // Theme
+            store::cmds::get_theme_mode,
+            store::cmds::get_resolved_theme,
+            store::cmds::set_theme_mode,
+            store::cmds::set_theme_preset_id,
+            // Transcript
+            store::cmds::get_selected_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running pi-gui-rs");

@@ -5,10 +5,11 @@ import { createTauriPiApp } from "./tauri-adapter";
 import "./styles.css";
 
 // Provide pi-gui's expected window.piApp API backed by Tauri invoke
-window.piApp = createTauriPiApp();
-
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+createTauriPiApp().then((api) => {
+  window.piApp = api;
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+});
