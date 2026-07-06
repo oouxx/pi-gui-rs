@@ -104,7 +104,7 @@ export function createTauriPiApp(): PiDesktopApi {
   // ── Event handler ─────────────────────────────────────────
 
   function handleAgentEvent(payload: any) {
-    const { event_type } = payload;
+    const { event_type, data } = payload;
     switch (event_type) {
       case "agent_start":
         state = { ...state, revision: nextRev(),
@@ -124,10 +124,33 @@ export function createTauriPiApp(): PiDesktopApi {
         refreshTranscript();
         break;
 
-      case "user_message":
+      case "user_message": {
+        // Add user message to transcript immediately (no IPC roundtrip)
+        const text = data?.text || "";
+        if (text && transcript) {
+          const newMsg: TranscriptMessage = {
+            id: "user-" + Date.now(),
+            role: "user",
+            text,
+            createdAt: nowISO(),
+          };
+          transcript = { ...transcript, transcript: [...transcript.transcript, newMsg] };
+          emitTranscript();
+        }
+        break;
+      }
       case "message_start":
+        refreshTranscript();
+        break;
+
       case "message_update":
+        // Don't poll on every delta — too much IPC; wait for message_end
+        break;
+
       case "message_end":
+        refreshTranscript();
+        break;
+
       case "tool_execution_start":
       case "tool_execution_end":
         refreshTranscript();
