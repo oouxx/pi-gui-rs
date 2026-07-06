@@ -69,18 +69,21 @@ export function createTauriPiApp(): PiDesktopApi {
 
   // Kick off Rust session creation immediately
   (async () => {
-    for (let i = 0; i < 30; i++) {
+    // Then create the session
+    for (let i = 0; i < 10; i++) {
       try {
         await invoke("create_session", { cwd: "/tmp" });
         rustReady = true;
         rustReadyResolve?.();
+        console.log("tauri-adapter: Rust session created");
         break;
-      } catch {
-        await new Promise((r) => setTimeout(r, 200));
+      } catch (e) {
+        console.error(`tauri-adapter: create_session failed (attempt ${i + 1}):`, e);
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
     if (!rustReady) {
-      console.error("tauri-adapter: Rust backend not available");
+      console.error("tauri-adapter: Rust backend not available after all retries");
       rustReadyResolve?.();
     }
   })();
