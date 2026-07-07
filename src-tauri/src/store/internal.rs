@@ -152,30 +152,23 @@ impl Store {
         let thinking_level = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultThinkingLevel"].as_str().map(|s| s.to_string());
         drop(state);
 
+        eprintln!("[LLM] create session: provider={provider:?} model={model_id:?}");
+
         use pi_coding_agent::core::model_registry::ModelRegistry;
         let registry = ModelRegistry::new(ModelRegistry::builtin_models_list());
         let initial_model = provider.as_ref()
             .and_then(|p| model_id.as_ref().and_then(|m| registry.find(p, m)));
 
-        let had_key = std::env::var("ANTHROPIC_API_KEY").is_ok();
+        let stream_fn = pi_coding_agent::core::sdk::create_default_stream_fn();
+
         let opts = || CreateAgentSessionOptions {
             cwd: cwd.to_string(), agent_dir: None,
             model: initial_model.clone(), thinking_level: thinking_level.clone(),
             scoped_models: None, no_tools: None, tools: None, exclude_tools: None,
             custom_prompt: None, append_system_prompt: None, session_name: None,
-            stream_fn: None, convert_to_llm: None, extension_paths: vec![], enable_extensions: false,
+            stream_fn: Some(stream_fn.clone()), convert_to_llm: None, extension_paths: vec![], enable_extensions: false,
         };
-        let result = create_agent_session(opts()).await;
-        let (mut session, _) = match result {
-            Ok(v) => v,
-            Err(ref e) if e.to_string().contains("No models available") && !had_key => {
-                std::env::set_var("ANTHROPIC_API_KEY", "placeholder");
-                let r = create_agent_session(opts()).await.map_err(|e| format!("{e}"))?;
-                std::env::remove_var("ANTHROPIC_API_KEY");
-                r
-            }
-            Err(e) => return Err(format!("{e}")),
-        };
+        let (mut session, _) = create_agent_session(opts()).await.map_err(|e| format!("{e}"))?;
         let sid = format!("sess-{}", uuid::Uuid::new_v4());
         *self.session_id.lock().await = Some(sid.clone());
         self.mutate(app, |s| {
@@ -219,7 +212,17 @@ impl Store {
             data: json!({"text": text, "timestamp": chrono::Utc::now().timestamp_millis()}),
         });
         tokio::spawn(async move {
+            eprintln!("[LLM] <<< {}", &t);
             session.add_user_text(&t).await;
+            eprintln!("[LLM] add_user_text done");
+            let msgs = session.get_messages().await;
+            for msg in &msgs {
+                if let pi_agent_core::types::AgentMessage::Assistant { content, error_message, .. } = msg {
+                    if let Some(e) = error_message { eprintln!("[LLM] error: {e}"); }
+                    let text: String = content.iter().filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None }).collect();
+                    if !text.is_empty() { eprintln!("[LLM] >>> {text}"); }
+                }
+            }
             *s.session.lock().await = Some(session);
             s.is_streaming.store(false, Ordering::SeqCst);
             let _ = a.emit("agent-event", FrontendEvent {

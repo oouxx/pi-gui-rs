@@ -421,6 +421,14 @@ export default function App() {
       : null;
   const activeTranscript = selectedTranscriptForSession?.transcript ?? [];
   const isTranscriptLoading = Boolean(selectedSession) && !selectedTranscriptForSession;
+  console.log("[UI] transcript check", {
+    hasTranscript: !!selectedTranscript,
+    wsMatch: selectedTranscript?.workspaceId === selectedWorkspace?.id,
+    sessMatch: selectedTranscript?.sessionId === selectedSession?.id,
+    ws: selectedWorkspace?.id, sess: selectedSession?.id,
+    tws: selectedTranscript?.workspaceId, tsess: selectedTranscript?.sessionId,
+    count: activeTranscript.length,
+  });
   const showSchemaSkewNotice =
     selectedTranscriptForSession?.schemaInfo?.writtenByNewerRuntime === true &&
     Boolean(selectedSessionKey) &&
@@ -1703,20 +1711,24 @@ export default function App() {
   };
 
   const submitComposerDraft = (options: { readonly deliverAs?: "steer" | "followUp" } = {}) => {
+    console.log("[UI] submitComposerDraft called", { hasSession: !!selectedSession, draftLen: composerDraft.length, attachments: composerAttachments.length, status: selectedSession?.status });
     if (!selectedSession) {
       return;
     }
 
     const hasComposerInput = composerDraft.trim().length > 0 || composerAttachments.length > 0;
     if (selectedSession.status === "running" && !hasComposerInput) {
+      console.log("[UI] cancelCurrentRun instead");
       void updateSnapshot(api, setSnapshot, () => api.cancelCurrentRun());
       return;
     }
 
     if (!hasComposerInput) {
+      console.log("[UI] no input, returning");
       return;
     }
     if (selectedSessionModelOnboarding.requiresModelSelection) {
+      console.log("[UI] requires model selection");
       return;
     }
 
@@ -1740,17 +1752,22 @@ export default function App() {
     const previousDraft = composerDraft;
     setComposerDraft("");
     setAttachmentsClearedOnSubmit(true);
+    console.log("[UI] calling api.submitComposer", { text: previousDraft.substring(0, 50) });
     void (async () => {
       const nextState = await updateSnapshot(api, setSnapshot, () =>
         api.submitComposer(previousDraft, selectedSession.status === "running" ? { deliverAs: options.deliverAs ?? "followUp" } : undefined),
-      );
+      ).catch((e) => {
+        console.log("[UI] submitComposer failed", e);
+        throw e;
+      });
       // Only apply the resolved draft if the user hasn't typed into the composer during the
       // in-flight submit; otherwise their new input would be clobbered.
       if (composerDraftRef.current === "") {
         setComposerDraft(nextState.composerDraft);
       }
       setAttachmentsClearedOnSubmit(false);
-    })().catch(() => {
+    })().catch((e) => {
+      console.log("[UI] submitComposer error", e);
       if (composerDraftRef.current === "") {
         setComposerDraft(previousDraft);
       }
@@ -2270,6 +2287,7 @@ export default function App() {
 
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && selectedSession?.status === "running") {
       event.preventDefault();
+      console.log("[UI] Enter+status=running → submitComposerDraft with deliverAs");
       submitComposerDraft({ deliverAs: (event.metaKey || event.ctrlKey) ? "steer" : "followUp" });
       return;
     }
@@ -2280,12 +2298,15 @@ export default function App() {
 
     event.preventDefault();
     if (!composerDraft.trim() && composerAttachments.length === 0) {
+      console.log("[UI] Enter but empty input");
       return;
     }
     if (selectedSessionModelOnboarding.requiresModelSelection) {
+      console.log("[UI] Enter but requires model selection");
       return;
     }
 
+    console.log("[UI] Enter → submitComposerDraft");
     submitComposerDraft();
   };
 

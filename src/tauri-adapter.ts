@@ -9,14 +9,12 @@
  * provides mock state for UI testing.
  */
 
-function getTauriWindow() {
-  return (window as any).__TAURI_INTERNALS__;
-}
-
 async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const win = getTauriWindow();
-  if (!win) throw new Error("Tauri IPC not available");
-  return win.invoke(cmd, args) as Promise<T>;
+  const ipc = (window as any).__TAURI_INTERNALS__;
+  console.log(`[IPC →] ${cmd}`, args);
+  const result = await (ipc.invoke(cmd, args) as Promise<T>);
+  console.log(`[IPC ←] ${cmd}`, result);
+  return result;
 }
 
 async function tauriListen<T>(event: string, handler: (event: { payload: T }) => void) {
@@ -37,6 +35,14 @@ function nowISO() { return new Date().toISOString(); }
 function createBrowserApi(): PiDesktopApi {
   const listeners = new Set<(state: DesktopAppState) => void>();
   function emit(s: DesktopAppState) { listeners.forEach((fn) => fn(s)); }
+
+  // ponytail: browser-mode transcript — in-memory array, no persistence
+  const transcriptListeners = new Set<(t: SelectedTranscriptRecord | null) => void>();
+  let browserMessages: Array<{id: string; kind: "message"; role: "user" | "assistant"; text: string; createdAt: string}> = [];
+  function getBrowserTranscript(): SelectedTranscriptRecord | null {
+    if (browserMessages.length === 0) return null;
+    return { workspaceId: state.selectedWorkspaceId, sessionId: state.selectedSessionId, transcript: browserMessages };
+  }
 
   let state: DesktopAppState = (() => {
     const base = createEmptyDesktopAppState();
@@ -86,8 +92,8 @@ function createBrowserApi(): PiDesktopApi {
     ping: async () => "pong",
     getState: async () => state,
     onStateChanged: (l) => { listeners.add(l); return () => listeners.delete(l); },
-    getSelectedTranscript: async () => null,
-    onSelectedTranscriptChanged: () => () => {},
+    getSelectedTranscript: async () => getBrowserTranscript(),
+    onSelectedTranscriptChanged: (l) => { transcriptListeners.add(l); return () => transcriptListeners.delete(l); },
     onCommand: () => () => {},
     onWorkspacePicked: () => () => {},
     onClipboardImagePasted: () => () => {},
@@ -180,8 +186,15 @@ function createBrowserApi(): PiDesktopApi {
     removeQueuedComposerMessage: async (id) => update({ queuedComposerMessages: state.queuedComposerMessages.filter((m: any) => m.id !== id) }),
     steerQueuedComposerMessage: async (id) => update({ queuedComposerMessages: state.queuedComposerMessages.map((m: any) => m.id === id ? { ...m, mode: "steer" } : m) }),
     updateComposerDraft: async (d) => update({ composerDraft: d }),
-    submitComposer: async (text) => {
-      console.log("browser-mode submit:", text);
+    submitComposer: async (text, _options) => {
+      const ts = nowISO();
+      browserMessages = [...browserMessages, { id: `msg-${Date.now()}`, kind: "message", role: "user", text, createdAt: ts }];
+      // ponytail: mock assistant reply after a short delay
+      setTimeout(() => {
+        browserMessages = [...browserMessages, { id: `msg-${Date.now()}-a`, kind: "message", role: "assistant", text: `Echo: ${text}`, createdAt: nowISO() }];
+        transcriptListeners.forEach((fn) => fn(getBrowserTranscript()));
+      }, 300);
+      transcriptListeners.forEach((fn) => fn(getBrowserTranscript()));
       return state;
     },
 
@@ -221,8 +234,7 @@ async function waitForTauriIpc(): Promise<boolean> {
 export async function createTauriPiApp(): Promise<PiDesktopApi> {
   const tauriReady = await waitForTauriIpc();
   if (!tauriReady) {
-    console.log("tauri-adapter: Tauri IPC not available, using browser fallback");
-    return createBrowserApi();
+    throw new Error("tauri-adapter: Tauri IPC not available after 10s");
   }
 
   // ── Event listeners ────────────────────────────────────

@@ -50,11 +50,16 @@ pub mod cmds {
     // ── Core ──
 
     #[tauri::command]
-    pub async fn ping() -> String { "pong".into() }
+    pub async fn ping() -> String {
+        eprintln!("[IPC →] ping");
+        "pong".into()
+    }
 
     #[tauri::command]
     pub async fn get_state(store: State<'_, Arc<Store>>) -> Result<DesktopState, String> {
-        Ok(store.state.lock().await.clone())
+        let state = store.state.lock().await.clone();
+        eprintln!("[IPC →] get_state: rev={}", state["revision"]);
+        Ok(state)
     }
 
     #[tauri::command]
@@ -200,10 +205,14 @@ pub mod cmds {
 
     #[tauri::command]
     pub async fn submit_composer(app: AppHandle, store: State<'_, Arc<Store>>, text: String, _options: Option<serde_json::Value>) -> Result<DesktopState, String> {
+        eprintln!("[IPC ←] submit_composer: len={}", text.len());
         if store.session.lock().await.is_none() {
+            eprintln!("[LLM] no session, creating one");
             store.create_agent_session(&app, "/tmp").await.map_err(|e| format!("{e}"))?;
         }
+        eprintln!("[LLM] sending message...");
         store.send_message(&app, &text).await.map_err(|e| e.to_string())?;
+        eprintln!("[LLM] send_message returned OK");
         Ok(store.state.lock().await.clone())
     }
 
@@ -416,6 +425,7 @@ pub mod cmds {
 
     #[tauri::command]
     pub async fn get_selected_transcript(store: State<'_, Arc<Store>>) -> Result<Option<serde_json::Value>, String> {
+        eprintln!("[IPC →] get_selected_transcript");
         let messages = store.get_messages().await;
         if messages.is_empty() { return Ok(None); }
         let ws_id = store.state.lock().await["selectedWorkspaceId"].as_str().unwrap_or("ws-default").to_string();
@@ -439,8 +449,10 @@ pub mod cmds {
                 .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)).unwrap_or_else(now_iso);
             Some(json!({"id": format!("msg-{}", ts), "kind": "message", "role": role, "text": text, "createdAt": created}))
         }).filter_map(|m| m).collect();
-        if transcript.is_empty() { return Ok(None); }
-        Ok(Some(json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript})))
+        if transcript.is_empty() { eprintln!("[IPC ←] get_selected_transcript: empty"); return Ok(None); }
+        let result = json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript});
+        eprintln!("[IPC ←] get_selected_transcript: ws={ws_id} sess={sess_id} count={}", result["transcript"].as_array().map_or(0, |a| a.len()));
+        Ok(Some(result))
     }
 
     // ── Workspace files (git) ──
