@@ -278,8 +278,20 @@ pub mod cmds {
 
     // ── Providers ──
 
-    stub!(login_provider, workspace_id: String, provider_id: String);
-    stub!(logout_provider, workspace_id: String, provider_id: String);
+    #[tauri::command]
+    pub async fn login_provider(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, provider_id: String) -> Result<DesktopState, String> {
+        pi_ai::providers::register_builtins::register_built_in_api_providers();
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id]["providers"] = build_runtime_snapshot()["providers"].clone();
+        }).await)
+    }
+
+    #[tauri::command]
+    pub async fn logout_provider(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, provider_id: String) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id]["providers"] = build_runtime_snapshot()["providers"].clone();
+        }).await)
+    }
 
     #[tauri::command]
     pub async fn set_provider_api_key(store: State<'_, Arc<Store>>, _workspace_id: String, provider_id: String, api_key: String) -> Result<DesktopState, String> {
@@ -289,8 +301,25 @@ pub mod cmds {
         Ok(store.state.lock().await.clone())
     }
 
-    stub!(set_custom_provider, workspace_id: String, config: serde_json::Value);
-    stub!(delete_custom_provider, workspace_id: String, provider_id: String);
+    #[tauri::command]
+    pub async fn set_custom_provider(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, config: serde_json::Value) -> Result<DesktopState, String> {
+        let path = pi_coding_agent::config::get_models_path();
+        if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+        let content = serde_json::to_string_pretty(&config).unwrap_or_default();
+        let _ = std::fs::write(&path, &content);
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id] = build_runtime_snapshot();
+        }).await)
+    }
+
+    #[tauri::command]
+    pub async fn delete_custom_provider(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, provider_id: String) -> Result<DesktopState, String> {
+        let path = pi_coding_agent::config::get_models_path();
+        let _ = std::fs::write(&path, "{}");
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id] = build_runtime_snapshot();
+        }).await)
+    }
     stub!(set_enable_skill_commands, workspace_id: String, enabled: bool);
     stub!(set_scoped_model_patterns, workspace_id: String, patterns: Vec<String>);
     stub!(set_skill_enabled, workspace_id: String, file_path: String, enabled: bool);
@@ -410,8 +439,11 @@ pub mod cmds {
     // ── Timeline / Session tree ──
 
     #[tauri::command]
-    pub async fn get_session_tree(store: State<'_, Arc<Store>>, _target: serde_json::Value) -> Result<serde_json::Value, String> {
-        let sid = store.state.lock().await["selectedSessionId"].as_str().unwrap_or("").to_string();
+    pub async fn get_session_tree(store: State<'_, Arc<Store>>, target: serde_json::Value) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let sid = target["sessionId"].as_str()
+            .or_else(|| state["selectedSessionId"].as_str())
+            .unwrap_or("").to_string();
         Ok(timeline::stub_session_tree(&sid))
     }
 
@@ -618,7 +650,8 @@ mod tests {
             scoped_models: None, no_tools: None, tools: None, exclude_tools: None,
             custom_prompt: Some("You are a helpful assistant. Keep responses very brief.".into()),
             append_system_prompt: None, session_name: Some("test-openrouter".into()),
-            stream_fn: None, convert_to_llm: None, extension_paths: vec![], enable_extensions: false,
+            stream_fn: None, convert_to_llm: None, extension_paths: vec![],
+            enable_extensions: false, cli_provider: None, cli_model: None,
         };
         let (mut session, _result) = pi_coding_agent::core::sdk::create_agent_session(options).await.expect("create_agent_session failed");
         let response_text = Arc::new(tokio::sync::Mutex::new(String::new()));
