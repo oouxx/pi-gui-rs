@@ -92,7 +92,7 @@ pub fn default_state() -> DesktopState {
     json!({
         "revision": 1,
         "workspaces": [{
-            "id": "ws-default", "name": "default", "path": "/tmp",
+            "id": "ws-default", "name": "default", "path": "",
             "lastOpenedAt": now_iso(), "kind": "primary", "sessions": []
         }],
         "worktreesByWorkspace": {},

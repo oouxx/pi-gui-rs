@@ -211,7 +211,13 @@ pub mod cmds {
         eprintln!("[IPC ←] submit_composer: len={}", text.len());
         if store.session.lock().await.is_none() {
             eprintln!("[LLM] no session, creating one");
-            store.create_agent_session(&app, "/tmp", None).await.map_err(|e| format!("{e}"))?;
+            let state = store.state.lock().await;
+            let cwd = state["selectedWorkspaceId"].as_str()
+                .and_then(|ws_id| workspace::workspace_path(&state, ws_id))
+                .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "/tmp".into());
+            drop(state);
+            store.create_agent_session(&app, &cwd, None).await.map_err(|e| format!("{e}"))?;
         }
         eprintln!("[LLM] sending message...");
         store.send_message(&app, &text).await.map_err(|e| e.to_string())?;
@@ -232,7 +238,12 @@ pub mod cmds {
             }
         }
         if store.session.lock().await.is_none() {
-            store.create_agent_session(&app, "/tmp", None).await.map_err(|e| format!("{e}"))?;
+            let state = store.state.lock().await;
+            let cwd = workspace::workspace_path(&state, ws_id)
+                .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "/tmp".into());
+            drop(state);
+            store.create_agent_session(&app, &cwd, None).await.map_err(|e| format!("{e}"))?;
         }
         if let Some(p) = input["prompt"].as_str().filter(|p| !p.is_empty()) {
             store.send_message(&app, p).await.map_err(|e| e.to_string())?;
