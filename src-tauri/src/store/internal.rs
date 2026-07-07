@@ -223,6 +223,7 @@ impl Store {
                     if !text.is_empty() { eprintln!("[LLM] >>> {text}"); }
                 }
             }
+            let sid3 = sid2.clone();
             *s.session.lock().await = Some(session);
             s.is_streaming.store(false, Ordering::SeqCst);
             let _ = a.emit("agent-event", FrontendEvent {
@@ -230,6 +231,9 @@ impl Store {
                 session_id: sid2,
                 data: json!({"message": null, "tool_results": []}),
             });
+            // Force a state refresh so the frontend can pick up the updated session messages
+            let st = s.state.lock().await.clone();
+            let _ = a.emit("pi-gui:state-changed", &st);
         });
         Ok(())
     }

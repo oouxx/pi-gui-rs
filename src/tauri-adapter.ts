@@ -263,10 +263,10 @@ export async function createTauriPiApp(): Promise<PiDesktopApi> {
     }
   })();
 
-  // Helper to fetch latest transcript from backend
   async function refreshTranscript(listeners: Set<(t: SelectedTranscriptRecord | null) => void>) {
     try {
       const transcript = await tauriInvoke<SelectedTranscriptRecord | null>("get_selected_transcript");
+      console.log("[UI] refreshTranscript:", transcript ? `ws=${transcript.workspaceId} sess=${transcript.sessionId} count=${transcript.transcript.length}` : "null");
       listeners.forEach((fn) => fn(transcript));
     } catch { /* ignore */ }
   }

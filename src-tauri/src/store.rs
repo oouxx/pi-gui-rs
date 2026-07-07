@@ -428,6 +428,9 @@ pub mod cmds {
         eprintln!("[IPC →] get_selected_transcript");
         let messages = store.get_messages().await;
         if messages.is_empty() { return Ok(None); }
+        let sid_state = store.state.lock().await["selectedSessionId"].as_str().unwrap_or("").to_string();
+        let sid_sess = store.session_id.lock().await.clone().unwrap_or_default();
+        eprintln!("[IPC] sess_id check: state={sid_state} session={sid_sess} match={}", sid_state == sid_sess);
         let ws_id = store.state.lock().await["selectedWorkspaceId"].as_str().unwrap_or("ws-default").to_string();
         let sess_id = store.state.lock().await["selectedSessionId"].as_str().unwrap_or("").to_string();
         let transcript: Vec<serde_json::Value> = messages.iter().map(|msg| {
@@ -451,7 +454,16 @@ pub mod cmds {
         }).filter_map(|m| m).collect();
         if transcript.is_empty() { eprintln!("[IPC ←] get_selected_transcript: empty"); return Ok(None); }
         let result = json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript});
-        eprintln!("[IPC ←] get_selected_transcript: ws={ws_id} sess={sess_id} count={}", result["transcript"].as_array().map_or(0, |a| a.len()));
+        let count = result["transcript"].as_array().map_or(0, |a| a.len());
+        let roles: Vec<&str> = result["transcript"].as_array().map(|a| a.iter().filter_map(|m| m["role"].as_str()).collect()).unwrap_or_default();
+        eprintln!("[IPC ←] get_selected_transcript: ws={ws_id} sess={sess_id} count={count} roles={roles:?}");
+        let state2 = store.state.lock().await;
+        let has_sess = state2["workspaces"].as_array().and_then(|ws| ws.iter().find(|w| w["id"] == ws_id))
+            .and_then(|w| w["sessions"].as_array())
+            .map(|s| s.iter().any(|s| s["id"] == sess_id)).unwrap_or(false);
+        let sid = state2["selectedSessionId"].as_str().unwrap_or("").to_string();
+        eprintln!("[IPC] frontend check: selectedSessId={sid} sessInWorkspace={has_sess}");
+        drop(state2);
         Ok(Some(result))
     }
 

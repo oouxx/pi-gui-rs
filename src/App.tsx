@@ -418,7 +418,9 @@ export default function App() {
     selectedTranscript.workspaceId === selectedWorkspace.id &&
     selectedTranscript.sessionId === selectedSession.id
       ? selectedTranscript
-      : null;
+      : selectedTranscript && selectedTranscript.transcript.length > 0
+        ? selectedTranscript
+        : null;
   const activeTranscript = selectedTranscriptForSession?.transcript ?? [];
   const isTranscriptLoading = Boolean(selectedSession) && !selectedTranscriptForSession;
   console.log("[UI] transcript check", {
