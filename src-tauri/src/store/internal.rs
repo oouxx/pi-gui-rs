@@ -9,7 +9,6 @@ use pi_coding_agent::core::agent_session::AgentSession;
 use pi_coding_agent::core::sdk::{create_agent_session, CreateAgentSessionOptions};
 use serde::Serialize;
 use serde_json::json;
-use std::error::Error;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
@@ -258,66 +257,12 @@ impl Store {
             data: json!({"text": text, "timestamp": chrono::Utc::now().timestamp_millis()}),
         });
 
-        // ── diagnostic: log provider/model/env ──────────────────────
+        // ── log provider/model ──────────────────────────────────────
         let state_snapshot = self.state.lock().await.clone();
         let ws_id = state_snapshot["selectedWorkspaceId"].as_str().unwrap_or("?").to_string();
         let diag_provider = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"].as_str().map(|s| s.to_string());
         let diag_model = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"].as_str().map(|s| s.to_string());
-        for (label, var) in [("ANTHROPIC", "ANTHROPIC_API_KEY"), ("OPENAI", "OPENAI_API_KEY"), ("OPENROUTER", "OPENROUTER_API_KEY"), ("DEEPSEEK", "DEEPSEEK_API_KEY"), ("GOOGLE", "GOOGLE_API_KEY")] {
-            let v = std::env::var(var).ok().map(|k| if k.is_empty() || k == "placeholder" { "❌ EMPTY".into() } else { format!("✅ {}..{}", &k[..4], &k[k.len()-4..]) }).unwrap_or_else(|| "–".into());
-            eprintln!("[LLM]  env {label}={v}");
-        }
-        eprintln!("[LLM] send: ws={ws_id} settings_provider={diag_provider:?} settings_model={diag_model:?}");
-        // Probe: try building a reqwest Client to find the TLS/connect error
-        let probe_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-        eprintln!("[LLM] probe: building reqwest::Client (with rustls)...");
-        match reqwest::Client::builder().build() {
-            Ok(client) => {
-                eprintln!("[LLM] probe: build OK, sending GET https://openrouter.ai/api/v1/models");
-                match client.get("https://openrouter.ai/api/v1/models")
-                    .header("Authorization", format!("Bearer {probe_key}"))
-                    .send().await
-                {
-                    Ok(r) => eprintln!("[LLM] probe: GET → {}", r.status()),
-                    Err(e) => {
-                        eprintln!("[LLM] probe: GET failed: {e}");
-                        let mut c: Option<&(dyn Error + 'static)> = e.source();
-                        while let Some(src) = c { eprintln!("[LLM] probe:   source: {src}"); c = src.source(); }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[LLM] probe: build FAILED: {e}");
-                let mut c: Option<&(dyn std::error::Error + 'static)> = Some(&e);
-                while let Some(src) = c { eprintln!("[LLM] probe:   caused by: {src}"); c = src.source(); }
-            }
-        }
-        // Probe 2: mimic pi-ai's POST to /chat/completions
-        eprintln!("[LLM] probe2: POST as pi-ai does...");
-        if let Ok(client) = reqwest::Client::builder().build() {
-            let body = serde_json::json!({
-                "model": "openrouter/free",
-                "messages": [{"role": "user", "content": "hi"}],
-                "stream": true,
-                "stream_options": {"include_usage": true},
-            });
-            let pk = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-            eprintln!("[LLM] probe2: key len={}", pk.len());
-            let r = client
-                .post("https://openrouter.ai/api/v1/chat/completions")
-                .header("Authorization", format!("Bearer {pk}"))
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send().await;
-            match r {
-                Ok(r) => eprintln!("[LLM] probe2: POST → {} (len={:?})", r.status(), r.content_length()),
-                Err(e) => {
-                    eprintln!("[LLM] probe2: POST failed: {e}");
-                    let mut c: Option<&(dyn Error + 'static)> = e.source();
-                    while let Some(src) = c { eprintln!("[LLM] probe2:   source: {src}"); c = src.source(); }
-                }
-            }
-        }
+        eprintln!("[LLM] send: ws={ws_id} provider={diag_provider:?} model={diag_model:?}");
         drop(state_snapshot);
 
         tokio::spawn(async move {
