@@ -450,6 +450,25 @@ pub mod cmds {
 
     #[tauri::command]
     pub async fn start_thread(app: AppHandle, store: State<'_, Arc<Store>>, input: serde_json::Value) -> Result<DesktopState, String> {
+        // Sync model/thinking from input to state before creating agent session.
+        // The frontend's new-thread-view holds model selection in local React state,
+        // so it's NOT persisted via set_default_model before start_thread is called.
+        let ws_id = input["rootWorkspaceId"].as_str().unwrap_or("ws-default");
+        {
+            let mut state = store.state.lock().await;
+            if state["runtimeByWorkspace"][ws_id].is_null() {
+                state["runtimeByWorkspace"][ws_id] = json!({"settings": {}});
+            }
+            if let Some(p) = input["provider"].as_str() {
+                state["runtimeByWorkspace"][ws_id]["settings"]["defaultProvider"] = json!(p);
+            }
+            if let Some(m) = input["modelId"].as_str() {
+                state["runtimeByWorkspace"][ws_id]["settings"]["defaultModelId"] = json!(m);
+            }
+            if let Some(tl) = input["thinkingLevel"].as_str() {
+                state["runtimeByWorkspace"][ws_id]["settings"]["defaultThinkingLevel"] = json!(tl);
+            }
+        }
         if store.session.lock().await.is_none() {
             store.create_agent_session(&app, "/tmp").await.map_err(|e| format!("{e}"))?;
         }
@@ -696,7 +715,16 @@ pub mod cmds {
     }
     stub!(login_provider, workspace_id: String, provider_id: String);
     stub!(logout_provider, workspace_id: String, provider_id: String);
-    stub!(set_provider_api_key, workspace_id: String, provider_id: String, api_key: String);
+    #[tauri::command]
+    pub async fn set_provider_api_key(store: State<'_, Arc<Store>>, workspace_id: String, provider_id: String, api_key: String) -> Result<DesktopState, String> {
+        let _ = workspace_id;
+        // The SDK reads API keys from env vars via pi_ai::env_api_keys::get_env_api_key().
+        // Set the env var so the ModelRegistry can find it when checking has_configured_auth().
+        if let Some(var_name) = pi_ai::env_api_keys::get_env_var_name(&provider_id) {
+            std::env::set_var(var_name, &api_key);
+        }
+        Ok(store.state.lock().await.clone())
+    }
     stub!(set_custom_provider, workspace_id: String, config: serde_json::Value);
     stub!(delete_custom_provider, workspace_id: String, provider_id: String);
     stub!(set_enable_skill_commands, workspace_id: String, enabled: bool);
