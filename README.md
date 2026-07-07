@@ -95,6 +95,6 @@ npx shadcn@latest add tooltip
 
 ## Environment
 
-The app reads pi's standard config files and environment variables for API keys:
-- `~/.pi/config.json` or `{cwd}/.pi/config.json`
+The app reads pi-rs standard config files and environment variables for API keys:
+- `~/.pi-rs/agent/settings.json` or `{cwd}/.pi/config.json`
 - Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.

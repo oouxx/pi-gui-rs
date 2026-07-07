@@ -9,8 +9,11 @@ use pi_coding_agent::core::agent_session::AgentSession;
 use pi_coding_agent::core::sdk::{create_agent_session, CreateAgentSessionOptions};
 use serde::Serialize;
 use serde_json::json;
+use std::error::Error;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
+
+use super::persistence;
 
 pub type DesktopState = serde_json::Value;
 
@@ -30,8 +33,16 @@ pub fn next_id(prefix: &str) -> String {
 }
 
 pub fn set_sess_status(s: &mut DesktopState, sid: &str, status: &str) {
-    if let Some(arr) = s["workspaces"][0]["sessions"].as_array_mut() {
-        for sess in arr.iter_mut() {
+    let ws_list = match s["workspaces"].as_array_mut() {
+        Some(a) => a,
+        None => return,
+    };
+    for ws in ws_list.iter_mut() {
+        let sessions = match ws["sessions"].as_array_mut() {
+            Some(a) => a,
+            None => continue,
+        };
+        for sess in sessions.iter_mut() {
             if sess["id"] == sid {
                 sess["status"] = json!(status);
                 return;
@@ -43,8 +54,16 @@ pub fn set_sess_status(s: &mut DesktopState, sid: &str, status: &str) {
 pub fn set_sess_field(s: &mut DesktopState, target: &serde_json::Value, field: &str, value: serde_json::Value) {
     let ws_id = target["workspaceId"].as_str().unwrap_or("");
     let sess_id = target["sessionId"].as_str().unwrap_or("");
-    if let Some(ws) = s["workspaces"].as_array_mut().unwrap().iter_mut().find(|w| w["id"] == ws_id) {
-        if let Some(sess) = ws["sessions"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == sess_id) {
+    let ws_list = match s["workspaces"].as_array_mut() {
+        Some(a) => a,
+        None => return,
+    };
+    if let Some(ws) = ws_list.iter_mut().find(|w| w["id"] == ws_id) {
+        let sessions = match ws["sessions"].as_array_mut() {
+            Some(a) => a,
+            None => return,
+        };
+        if let Some(sess) = sessions.iter_mut().find(|s| s["id"] == sess_id) {
             sess[field] = value;
         }
     }
@@ -65,6 +84,52 @@ pub fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
     }
 }
 
+// ── Default state ──────────────────────────────────────────
+
+/// The default UI state skeleton — used by `Store::new()` and by
+/// `persistence::restore_state()` as a merge base so that the app
+/// never sees a structurally incomplete state.
+pub fn default_state() -> DesktopState {
+    json!({
+        "revision": 1,
+        "workspaces": [{
+            "id": "ws-default", "name": "default", "path": "/tmp",
+            "lastOpenedAt": now_iso(), "kind": "primary", "sessions": []
+        }],
+        "worktreesByWorkspace": {},
+        "selectedWorkspaceId": "ws-default",
+        "selectedSessionId": "",
+        "activeView": "threads",
+        "composerDraft": "",
+        "composerDraftSyncSource": "state",
+        "composerDraftSyncNonce": 0,
+        "composerAttachments": [],
+        "queuedComposerMessages": [],
+        "runtimeByWorkspace": {},
+        "sessionCommandsBySession": {},
+        "sessionExtensionUiBySession": {},
+        "extensionCommandCompatibilityByWorkspace": {},
+        "orchestrationChildren": [],
+        "notificationPreferences": {
+            "backgroundCompletion": true,
+            "backgroundFailure": true,
+            "attentionNeeded": true
+        },
+        "integratedTerminalShell": "",
+        "lastViewedAtBySession": {},
+        "pinnedAtBySession": {},
+        "pinnedSessionOrder": [],
+        "workspaceOrder": [],
+        "modelSettingsScopeMode": "app-global",
+        "globalModelSettings": {"enabledModelPatterns": []},
+        "themeMode": "system",
+        "themePresetId": "default",
+        "sidebarCollapsed": false,
+        "enableTransparency": false,
+        "lastError": null
+    })
+}
+
 // ── Store ───────────────────────────────────────────────────
 
 pub struct Store {
@@ -77,44 +142,7 @@ pub struct Store {
 impl Store {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(json!({
-                "revision": 1,
-                "workspaces": [{
-                    "id": "ws-default", "name": "default", "path": "/tmp",
-                    "lastOpenedAt": now_iso(), "kind": "primary", "sessions": []
-                }],
-                "worktreesByWorkspace": {},
-                "selectedWorkspaceId": "ws-default",
-                "selectedSessionId": "",
-                "activeView": "threads",
-                "composerDraft": "",
-                "composerDraftSyncSource": "state",
-                "composerDraftSyncNonce": 0,
-                "composerAttachments": [],
-                "queuedComposerMessages": [],
-                "runtimeByWorkspace": {},
-                "sessionCommandsBySession": {},
-                "sessionExtensionUiBySession": {},
-                "extensionCommandCompatibilityByWorkspace": {},
-                "orchestrationChildren": [],
-                "notificationPreferences": {
-                    "backgroundCompletion": true,
-                    "backgroundFailure": true,
-                    "attentionNeeded": true
-                },
-                "integratedTerminalShell": "",
-                "lastViewedAtBySession": {},
-                "pinnedAtBySession": {},
-                "pinnedSessionOrder": [],
-                "workspaceOrder": [],
-                "modelSettingsScopeMode": "app-global",
-                "globalModelSettings": {"enabledModelPatterns": []},
-                "themeMode": "system",
-                "themePresetId": "default",
-                "sidebarCollapsed": false,
-                "enableTransparency": false,
-                "lastError": null
-            })),
+            state: Mutex::new(default_state()),
             session: Mutex::new(None),
             session_id: Mutex::new(None),
             is_streaming: AtomicBool::new(false),
@@ -122,10 +150,21 @@ impl Store {
     }
 
     pub fn new_with_runtime() -> Arc<Self> {
+        // Restore persisted state on top of defaults, so user's sessions
+        // and settings survive restarts.
+        let restored = persistence::restore_state();
         let store = Self::new();
-        let mut state = store.state.blocking_lock();
-        state["runtimeByWorkspace"]["ws-default"] = super::runtime::build_runtime_snapshot();
-        drop(state);
+        {
+            let mut state = store.state.blocking_lock();
+            *state = restored;
+            // Always refresh runtime (provider lists, env keys) on startup,
+            // but keep user-level settings that the persisted state carries.
+            state["runtimeByWorkspace"]["ws-default"] =
+                super::runtime::build_runtime_snapshot();
+            // Bump revision so the frontend knows the server restarted.
+            let rev = state["revision"].as_u64().unwrap_or(0) + 1;
+            state["revision"] = json!(rev);
+        }
         store
     }
 
@@ -138,6 +177,7 @@ impl Store {
         state["revision"] = json!(rev);
         let result = state.clone();
         let _ = app.emit("pi-gui:state-changed", &result);
+        persistence::persist_state(&result);
         drop(state);
         result
     }
@@ -166,9 +206,15 @@ impl Store {
             model: initial_model.clone(), thinking_level: thinking_level.clone(),
             scoped_models: None, no_tools: None, tools: None, exclude_tools: None,
             custom_prompt: None, append_system_prompt: None, session_name: None,
-            stream_fn: Some(stream_fn.clone()), convert_to_llm: None, extension_paths: vec![], enable_extensions: false,
+            stream_fn: Some(stream_fn.clone()), convert_to_llm: None, extension_paths: vec![],
+            enable_extensions: false, cli_provider: None, cli_model: None,
         };
-        let (mut session, _) = create_agent_session(opts()).await.map_err(|e| format!("{e}"))?;
+        let (mut session, result) = create_agent_session(opts()).await.map_err(|e| format!("{e}"))?;
+        eprintln!("[LLM] session created: model_fallback={:?}", result.model_fallback_message);
+        // Log the actual model being used by inspecting the session config
+        eprintln!("[LLM] session cwd={} id={} name={:?}", session.get_cwd(), session.get_session_id(), session.get_session_name());
+        eprintln!("[LLM] session scoped_models count={}", session.get_scoped_models().len());
+        if let Some(last_text) = session.get_last_assistant_text() { eprintln!("[LLM] session last_text='{last_text}'"); }
         let sid = format!("sess-{}", uuid::Uuid::new_v4());
         *self.session_id.lock().await = Some(sid.clone());
         self.mutate(app, |s| {
@@ -211,19 +257,88 @@ impl Store {
             event_type: "user_message".into(), session_id: sid,
             data: json!({"text": text, "timestamp": chrono::Utc::now().timestamp_millis()}),
         });
+
+        // ── diagnostic: log provider/model/env ──────────────────────
+        let state_snapshot = self.state.lock().await.clone();
+        let ws_id = state_snapshot["selectedWorkspaceId"].as_str().unwrap_or("?").to_string();
+        let diag_provider = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"].as_str().map(|s| s.to_string());
+        let diag_model = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"].as_str().map(|s| s.to_string());
+        for (label, var) in [("ANTHROPIC", "ANTHROPIC_API_KEY"), ("OPENAI", "OPENAI_API_KEY"), ("OPENROUTER", "OPENROUTER_API_KEY"), ("DEEPSEEK", "DEEPSEEK_API_KEY"), ("GOOGLE", "GOOGLE_API_KEY")] {
+            let v = std::env::var(var).ok().map(|k| if k.is_empty() || k == "placeholder" { "❌ EMPTY".into() } else { format!("✅ {}..{}", &k[..4], &k[k.len()-4..]) }).unwrap_or_else(|| "–".into());
+            eprintln!("[LLM]  env {label}={v}");
+        }
+        eprintln!("[LLM] send: ws={ws_id} settings_provider={diag_provider:?} settings_model={diag_model:?}");
+        // Probe: try building a reqwest Client to find the TLS/connect error
+        let probe_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+        eprintln!("[LLM] probe: building reqwest::Client (with rustls)...");
+        match reqwest::Client::builder().build() {
+            Ok(client) => {
+                eprintln!("[LLM] probe: build OK, sending GET https://openrouter.ai/api/v1/models");
+                match client.get("https://openrouter.ai/api/v1/models")
+                    .header("Authorization", format!("Bearer {probe_key}"))
+                    .send().await
+                {
+                    Ok(r) => eprintln!("[LLM] probe: GET → {}", r.status()),
+                    Err(e) => {
+                        eprintln!("[LLM] probe: GET failed: {e}");
+                        let mut c: Option<&(dyn Error + 'static)> = e.source();
+                        while let Some(src) = c { eprintln!("[LLM] probe:   source: {src}"); c = src.source(); }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[LLM] probe: build FAILED: {e}");
+                let mut c: Option<&(dyn std::error::Error + 'static)> = Some(&e);
+                while let Some(src) = c { eprintln!("[LLM] probe:   caused by: {src}"); c = src.source(); }
+            }
+        }
+        // Probe 2: mimic pi-ai's POST to /chat/completions
+        eprintln!("[LLM] probe2: POST as pi-ai does...");
+        if let Ok(client) = reqwest::Client::builder().build() {
+            let body = serde_json::json!({
+                "model": "openrouter/free",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": true,
+                "stream_options": {"include_usage": true},
+            });
+            let pk = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+            eprintln!("[LLM] probe2: key len={}", pk.len());
+            let r = client
+                .post("https://openrouter.ai/api/v1/chat/completions")
+                .header("Authorization", format!("Bearer {pk}"))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send().await;
+            match r {
+                Ok(r) => eprintln!("[LLM] probe2: POST → {} (len={:?})", r.status(), r.content_length()),
+                Err(e) => {
+                    eprintln!("[LLM] probe2: POST failed: {e}");
+                    let mut c: Option<&(dyn Error + 'static)> = e.source();
+                    while let Some(src) = c { eprintln!("[LLM] probe2:   source: {src}"); c = src.source(); }
+                }
+            }
+        }
+        drop(state_snapshot);
+
         tokio::spawn(async move {
             eprintln!("[LLM] <<< {}", &t);
             session.add_user_text(&t).await;
             eprintln!("[LLM] add_user_text done");
             let msgs = session.get_messages().await;
             for msg in &msgs {
-                if let pi_agent_core::types::AgentMessage::Assistant { content, error_message, .. } = msg {
-                    if let Some(e) = error_message { eprintln!("[LLM] error: {e}"); }
+                if let pi_agent_core::types::AgentMessage::Assistant { content, error_message, api, provider, model, .. } = msg {
+                    if let Some(e) = error_message {
+                        eprintln!("[LLM] error: {e}");
+                        let err_debug = format!("{:#?}", e);
+                        if err_debug != e.to_string() {
+                            eprintln!("[LLM] error debug: {err_debug}");
+                        }
+                    }
+                    eprintln!("[LLM] assistant msg: api={api} provider={provider} model={model}");
                     let text: String = content.iter().filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None }).collect();
                     if !text.is_empty() { eprintln!("[LLM] >>> {text}"); }
                 }
             }
-            let sid3 = sid2.clone();
             *s.session.lock().await = Some(session);
             s.is_streaming.store(false, Ordering::SeqCst);
             let _ = a.emit("agent-event", FrontendEvent {

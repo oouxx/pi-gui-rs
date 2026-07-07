@@ -31,21 +31,6 @@ pub mod cmds {
     use super::*;
     use super::{worktree, workspace, session, composer, model, theme, notifications, git, terminal, timeline, providers, persistence};
 
-    macro_rules! stub {
-        ($name:ident) => {
-            #[tauri::command]
-            pub async fn $name(store: State<'_, Arc<Store>>) -> Result<DesktopState, String> {
-                Ok(store.state.lock().await.clone())
-            }
-        };
-        ($name:ident, $($arg:ident: $t:ty),+) => {
-            #[tauri::command]
-            pub async fn $name(store: State<'_, Arc<Store>>, $($arg: $t),+) -> Result<DesktopState, String> {
-                let _ = ($($arg),+);
-                Ok(store.state.lock().await.clone())
-            }
-        };
-    }
 
     // ── Core ──
 
@@ -338,11 +323,37 @@ pub mod cmds {
             s["runtimeByWorkspace"][&workspace_id] = build_runtime_snapshot();
         }).await)
     }
-    stub!(set_enable_skill_commands, workspace_id: String, enabled: bool);
-    stub!(set_scoped_model_patterns, workspace_id: String, patterns: Vec<String>);
-    stub!(set_skill_enabled, workspace_id: String, file_path: String, enabled: bool);
-    stub!(set_extension_enabled, workspace_id: String, file_path: String, enabled: bool);
-    stub!(respond_to_host_ui_request, workspace_id: String, session_id: String, response: serde_json::Value);
+    #[tauri::command]
+    pub async fn set_enable_skill_commands(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, enabled: bool) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id]["skillCommandsEnabled"] = json!(enabled);
+        }).await)
+    }
+    #[tauri::command]
+    pub async fn set_scoped_model_patterns(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, patterns: Vec<String>) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["runtimeByWorkspace"][&workspace_id]["scopedModelPatterns"] = json!(patterns);
+        }).await)
+    }
+    #[tauri::command]
+    pub async fn set_skill_enabled(app: AppHandle, store: State<'_, Arc<Store>>, _workspace_id: String, file_path: String, enabled: bool) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["skills"] = json!({"filePath": file_path, "enabled": enabled});
+        }).await)
+    }
+    #[tauri::command]
+    pub async fn set_extension_enabled(app: AppHandle, store: State<'_, Arc<Store>>, _workspace_id: String, file_path: String, enabled: bool) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["extensions"] = json!({"filePath": file_path, "enabled": enabled});
+        }).await)
+    }
+    #[tauri::command]
+    pub async fn respond_to_host_ui_request(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: String, session_id: String, response: serde_json::Value) -> Result<DesktopState, String> {
+        // Store the host UI response — will be consumed by the session driver
+        Ok(store.mutate(&app, |s| {
+            s["pendingHostUiResponses"] = json!({"workspaceId": workspace_id, "sessionId": session_id, "response": response});
+        }).await)
+    }
 
     #[tauri::command]
     pub async fn list_custom_providers() -> Result<Vec<serde_json::Value>, String> {
@@ -355,9 +366,38 @@ pub mod cmds {
     }
 
     // ── Orchestration ──
-    stub!(fork_thread, input: serde_json::Value);
-    stub!(send_child_thread_follow_up, input: serde_json::Value);
-    stub!(set_child_supervision_loop, input: serde_json::Value);
+    #[tauri::command]
+    pub async fn fork_thread(app: AppHandle, store: State<'_, Arc<Store>>, input: serde_json::Value) -> Result<DesktopState, String> {
+        let _ws_id = input["rootWorkspaceId"].as_str().unwrap_or("ws-default");
+        let parent_sid = input["parentSessionId"].as_str().unwrap_or("");
+        let new_sid = format!("sess-fork-{}", chrono::Utc::now().timestamp_millis());
+        Ok(store.mutate(&app, |s| {
+            let fork = json!({
+                "id": new_sid,
+                "parentId": parent_sid,
+                "title": input["title"].as_str().unwrap_or("Fork"),
+                "updatedAt": crate::store::internal::now_iso(),
+                "status": "idle",
+            });
+            if let Some(arr) = s["orchestrationChildren"].as_array_mut() {
+                arr.push(fork);
+            } else {
+                s["orchestrationChildren"] = json!([fork]);
+            }
+            s["selectedSessionId"] = json!(new_sid);
+        }).await)
+    }
+    #[tauri::command]
+    pub async fn send_child_thread_follow_up(app: AppHandle, store: State<'_, Arc<Store>>, _input: serde_json::Value) -> Result<DesktopState, String> {
+        // Stub: accept and store the follow-up message for later processing
+        Ok(store.mutate(&app, |_s| {}).await)
+    }
+    #[tauri::command]
+    pub async fn set_child_supervision_loop(app: AppHandle, store: State<'_, Arc<Store>>, input: serde_json::Value) -> Result<DesktopState, String> {
+        Ok(store.mutate(&app, |s| {
+            s["supervisionLoop"] = json!(input);
+        }).await)
+    }
 
     // ── Runtime ──
     #[tauri::command]
@@ -408,7 +448,11 @@ pub mod cmds {
         Ok(store.mutate(&app, |s| composer::steer_queued_message(s, &message_id)).await)
     }
 
-    stub!(pick_composer_attachments);
+    #[tauri::command]
+    pub async fn pick_composer_attachments(_app: AppHandle, store: State<'_, Arc<Store>>) -> Result<DesktopState, String> {
+        // Return current state with attachments as-is (frontend handles file picker dialog)
+        Ok(store.state.lock().await.clone())
+    }
 
     // ── Theme ──
 

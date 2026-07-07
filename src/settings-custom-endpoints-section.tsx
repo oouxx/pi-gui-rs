@@ -74,7 +74,7 @@ export function SettingsCustomEndpointsSection({
     <>
       <SettingsGroup
         title="Custom endpoints"
-        description="Add OpenAI-compatible endpoints (Ollama, vLLM, or your own server). Stored in ~/.pi/agent/models.json."
+        description="Add OpenAI-compatible endpoints (Ollama, vLLM, or your own server). Stored in ~/.pi-rs/agent/models.json."
       >
         {loadError ? (
           <div className="settings-row">
@@ -260,7 +260,7 @@ function CustomEndpointDialog({ mode, existingProviderIds, onClose, onSave }: Cu
         <div className="extension-dialog__title">{isEdit ? "Edit custom endpoint" : "Add custom endpoint"}</div>
         <p className="extension-dialog__body">
           Configure an OpenAI-compatible server. The endpoint and API key are stored in plaintext at
-          <code> ~/.pi/agent/models.json</code>.
+          <code> ~/.pi-rs/agent/models.json</code>.
         </p>
         <label className="settings-field">
           <span>Provider ID</span>

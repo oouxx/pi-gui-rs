@@ -27,19 +27,22 @@ pub fn set_default_thinking_level(state: &mut DesktopState, ws_id: &str, level: 
     state["globalModelSettings"]["defaultThinkingLevel"] = json!(level);
 }
 
+fn find_session<'a>(state: &'a mut DesktopState, ws_id: &str, session_id: &str) -> Option<&'a mut serde_json::Value> {
+    let ws_list = state["workspaces"].as_array_mut()?;
+    let ws = ws_list.iter_mut().find(|w| w["id"] == ws_id)?;
+    let sessions = ws["sessions"].as_array_mut()?;
+    sessions.iter_mut().find(|s| s["id"] == session_id)
+}
+
 pub fn set_session_model(state: &mut DesktopState, ws_id: &str, session_id: &str, provider: &str, model_id: &str) {
-    if let Some(ws) = state["workspaces"].as_array_mut().unwrap().iter_mut().find(|w| w["id"] == ws_id) {
-        if let Some(sess) = ws["sessions"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == session_id) {
-            sess["config"] = json!({"provider": provider, "modelId": model_id});
-        }
+    if let Some(sess) = find_session(state, ws_id, session_id) {
+        sess["config"] = json!({"provider": provider, "modelId": model_id});
     }
 }
 
 pub fn set_session_thinking_level(state: &mut DesktopState, ws_id: &str, session_id: &str, level: &str) {
-    if let Some(ws) = state["workspaces"].as_array_mut().unwrap().iter_mut().find(|w| w["id"] == ws_id) {
-        if let Some(sess) = ws["sessions"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == session_id) {
-            sess["thinkingLevel"] = json!(level);
-        }
+    if let Some(sess) = find_session(state, ws_id, session_id) {
+        sess["thinkingLevel"] = json!(level);
     }
 }
 
