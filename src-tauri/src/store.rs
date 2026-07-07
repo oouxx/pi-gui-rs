@@ -107,9 +107,24 @@ impl Store {
 
     pub async fn create_agent_session(self: &Arc<Self>, app: &AppHandle, cwd: &str) -> Result<String, String> {
         pi_ai::providers::register_builtins::register_built_in_api_providers();
+
+        // Read user's model selection from store state (set via set_default_model)
+        let state = self.state.lock().await;
+        let ws_id = state["selectedWorkspaceId"].as_str().unwrap_or("ws-default").to_string();
+        let provider = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"].as_str().map(|s| s.to_string());
+        let model_id = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"].as_str().map(|s| s.to_string());
+        let thinking_level = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultThinkingLevel"].as_str().map(|s| s.to_string());
+        drop(state);
+
+        use pi_coding_agent::core::model_registry::ModelRegistry;
+        let registry = ModelRegistry::new(ModelRegistry::builtin_models_list());
+        let initial_model: Option<pi_agent_core::pi_ai_types::Model> = provider.as_ref()
+            .and_then(|p| model_id.as_ref().and_then(|m| registry.find(p, m)));
+
         let had_key = std::env::var("ANTHROPIC_API_KEY").is_ok();
         let opts = || CreateAgentSessionOptions {
-            cwd: cwd.to_string(), agent_dir: None, model: None, thinking_level: None,
+            cwd: cwd.to_string(), agent_dir: None,
+            model: initial_model.clone(), thinking_level: thinking_level.clone(),
             scoped_models: None, no_tools: None, tools: None, exclude_tools: None,
             custom_prompt: None, append_system_prompt: None, session_name: None,
             stream_fn: None, convert_to_llm: None, extension_paths: vec![], enable_extensions: false,
