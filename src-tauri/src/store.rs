@@ -436,7 +436,7 @@ pub mod cmds {
             let ts_secs = *ts as f64 / 1000.0;
             let created = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
                 .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)).unwrap_or_else(now_iso);
-            Some(json!({"id": format!("msg-{}", ts), "role": role, "text": text, "createdAt": created}))
+            Some(json!({"id": format!("msg-{}", ts), "kind": "message", "role": role, "text": text, "createdAt": created}))
         }).filter_map(|m| m).collect();
         if transcript.is_empty() { return Ok(None); }
         Ok(Some(json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript})))
