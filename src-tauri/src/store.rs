@@ -976,36 +976,41 @@ mod tests {
         });
 
         session.subscribe(listener).await;
+
+        // ── Turn 1: initial greeting ──
         session.add_user_text("Say 'hello' in one word.").await;
         session.wait_for_idle().await;
+        let turn1 = response_text.lock().await.clone();
+        eprintln!("[test] Turn1: '{turn1}'");
+        assert!(!turn1.is_empty(), "Turn 1 empty");
+        response_text.lock().await.clear();
 
-        let text = response_text.lock().await.clone();
-        if text.is_empty() {
-            // Fallback: try reading messages directly
-            let messages = session.get_messages().await;
-            eprintln!("[test] Messages count: {}", messages.len());
-            for (i, msg) in messages.iter().enumerate() {
-                match msg {
-                    pi_agent_core::types::AgentMessage::Assistant { content, .. } => {
-                        let t: String = content.iter()
-                            .filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None })
-                            .collect();
-                        eprintln!("[test] Msg[{i}] Assistant: '{t}'");
-                    }
-                    pi_agent_core::types::AgentMessage::User { content, .. } => {
-                        let t: String = content.iter()
-                            .filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None })
-                            .collect();
-                        eprintln!("[test] Msg[{i}] User: '{t}'");
-                    }
-                    _ => eprintln!("[test] Msg[{i}] {:?}", msg),
-                }
-            }
-        } else {
-            eprintln!("[test] Response: '{text}'");
-        }
+        // ── Turn 2: follow-up (tests context retention) ──
+        session.add_user_text("Now say 'goodbye' in one word.").await;
+        session.wait_for_idle().await;
+        let turn2 = response_text.lock().await.clone();
+        eprintln!("[test] Turn2: '{turn2}'");
+        assert!(!turn2.is_empty(), "Turn 2 empty");
+        response_text.lock().await.clear();
 
-        assert!(!text.is_empty(), "Expected non-empty response from openrouter/free");
+        // ── Turn 3: ask about conversation history ──
+        session.add_user_text("What was the first word I asked you to say?").await;
+        session.wait_for_idle().await;
+        let turn3 = response_text.lock().await.clone();
+        eprintln!("[test] Turn3: '{turn3}'");
+        assert!(!turn3.is_empty(), "Turn 3 empty");
+
+        // Verify context: turn3 should mention "hello"
+        let turn3_lower = turn3.to_lowercase();
+        assert!(
+            turn3_lower.contains("hello"),
+            "Turn 3 should refer back to 'hello' but got: '{turn3}'"
+        );
+
+        // Final sanity: total messages
+        let messages = session.get_messages().await;
+        eprintln!("[test] Total messages: {}", messages.len());
+        assert!(messages.len() >= 6, "Expected ≥6 messages (3 user + 3 assistant), got {}", messages.len());
     }
 }
 
