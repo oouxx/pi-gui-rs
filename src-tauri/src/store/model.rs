@@ -14,11 +14,17 @@ pub fn set_default_model(state: &mut DesktopState, ws_id: &str, provider: &str, 
     ensure_runtime(state, ws_id);
     state["runtimeByWorkspace"][ws_id]["settings"]["defaultProvider"] = json!(provider);
     state["runtimeByWorkspace"][ws_id]["settings"]["defaultModelId"] = json!(model_id);
+    // Also sync to globalModelSettings — when modelSettingsScopeMode is "app-global"
+    // the frontend's getEffectiveModelRuntime applies globalModelSettings on top of
+    // runtime settings, which would nuke these values if only stored in runtimeByWorkspace.
+    state["globalModelSettings"]["defaultProvider"] = json!(provider);
+    state["globalModelSettings"]["defaultModelId"] = json!(model_id);
 }
 
 pub fn set_default_thinking_level(state: &mut DesktopState, ws_id: &str, level: &str) {
     ensure_runtime(state, ws_id);
     state["runtimeByWorkspace"][ws_id]["settings"]["defaultThinkingLevel"] = json!(level);
+    state["globalModelSettings"]["defaultThinkingLevel"] = json!(level);
 }
 
 pub fn set_session_model(state: &mut DesktopState, ws_id: &str, session_id: &str, provider: &str, model_id: &str) {
