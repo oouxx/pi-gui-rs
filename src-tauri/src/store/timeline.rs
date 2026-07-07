@@ -22,7 +22,10 @@ pub fn build_session_tree(session_id: &str, messages: &[AgentMessage]) -> serde_
             }
             _ => ("system", String::new(), 0),
         };
-        let preview = if text.len() > 80 { format!("{}…", &text[..80]) } else { text };
+        let preview = if text.len() > 80 {
+            let truncated: String = text.chars().take(80).collect();
+            format!("{}…", truncated)
+        } else { text };
         json!({
             "id": format!("msg-{}", i),
             "kind": "message",
