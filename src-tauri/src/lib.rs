@@ -99,6 +99,16 @@ pub fn run() {
             store::cmds::set_theme_preset_id,
             // Transcript
             store::cmds::get_selected_transcript,
+            // Terminal
+            store::cmds::ensure_terminal_panel,
+            store::cmds::create_terminal_session,
+            store::cmds::set_active_terminal_session,
+            store::cmds::write_terminal,
+            store::cmds::resize_terminal,
+            store::cmds::restart_terminal_session,
+            store::cmds::close_terminal_session,
+            store::cmds::set_terminal_title,
+            store::cmds::set_terminal_focused,
         ])
         .run(tauri::generate_context!())
         .expect("error while running pi-gui-rs");

@@ -51,19 +51,31 @@ impl Store {
                 "selectedSessionId": "",
                 "activeView": "threads",
                 "composerDraft": "",
+                "composerDraftSyncSource": "state",
+                "composerDraftSyncNonce": 0,
                 "composerAttachments": [],
                 "queuedComposerMessages": [],
                 "runtimeByWorkspace": {},
+                "sessionCommandsBySession": {},
+                "sessionExtensionUiBySession": {},
+                "extensionCommandCompatibilityByWorkspace": {},
+                "orchestrationChildren": [],
+                "notificationPreferences": {
+                    "backgroundCompletion": true,
+                    "backgroundFailure": true,
+                    "attentionNeeded": true
+                },
+                "integratedTerminalShell": "",
+                "lastViewedAtBySession": {},
+                "pinnedAtBySession": {},
                 "pinnedSessionOrder": [],
                 "workspaceOrder": [],
                 "modelSettingsScopeMode": "app-global",
-                "globalModelSettings": {},
+                "globalModelSettings": {"enabledModelPatterns": []},
                 "themeMode": "system",
                 "themePresetId": "default",
                 "sidebarCollapsed": false,
                 "enableTransparency": false,
-                "notificationPreferences": {},
-                "integratedTerminalShell": "",
                 "lastError": null
             })),
             session: Mutex::new(None),
@@ -223,7 +235,7 @@ fn build_runtime_snapshot() -> serde_json::Value {
     let providers = registry.get_providers();
     let mut models = Vec::new();
     let mut provider_list = Vec::new();
-    let mut skills: Vec<serde_json::Value> = Vec::new();
+    let skills: Vec<serde_json::Value> = Vec::new();
 
     for pid in &providers {
         let has_auth = env_keys.get(pid.as_str())
@@ -608,17 +620,34 @@ pub mod cmds {
         Ok(build_runtime_snapshot())
     }
 
-    // ── Stubs (return state, align with original's no-op handlers) ──
-    stub!(pick_workspace);
-    stub!(open_workspace_in_finder, workspace_id: String);
+    // ── Stubs (return correct types matching original API) ──
+
+    // Workspace stubs
+    #[tauri::command]
+    pub async fn pick_workspace(store: State<'_, Arc<Store>>) -> Result<DesktopState, String> {
+        Ok(store.state.lock().await.clone())
+    }
+    #[tauri::command]
+    pub async fn open_workspace_in_finder(workspace_id: String) -> Result<(), String> {
+        let _ = workspace_id; Ok(())
+    }
+    #[tauri::command]
+    pub async fn open_skill_in_finder(workspace_id: String, file_path: String) -> Result<(), String> {
+        let _ = (workspace_id, file_path); Ok(())
+    }
+    #[tauri::command]
+    pub async fn open_extension_in_finder(workspace_id: String, file_path: String) -> Result<(), String> {
+        let _ = (workspace_id, file_path); Ok(())
+    }
     stub!(create_worktree, input: serde_json::Value);
     stub!(remove_worktree, input: serde_json::Value);
-    stub!(open_skill_in_finder, workspace_id: String, file_path: String);
-    stub!(open_extension_in_finder, workspace_id: String, file_path: String);
     stub!(sync_current_workspace);
+
+    // Session stubs
     stub!(fork_thread, input: serde_json::Value);
     stub!(send_child_thread_follow_up, input: serde_json::Value);
     stub!(set_child_supervision_loop, input: serde_json::Value);
+
     #[tauri::command]
     pub async fn refresh_runtime(app: AppHandle, store: State<'_, Arc<Store>>, workspace_id: Option<String>) -> Result<DesktopState, String> {
         let wid = workspace_id.unwrap_or_else(|| "ws-default".into());
@@ -626,33 +655,127 @@ pub mod cmds {
             s["runtimeByWorkspace"][&wid] = build_runtime_snapshot();
         }).await)
     }
+
+    // Model stubs
     stub!(set_default_thinking_level, workspace_id: String, thinking_level: String);
     stub!(set_session_thinking_level, workspace_id: String, session_id: String, thinking_level: String);
     stub!(login_provider, workspace_id: String, provider_id: String);
     stub!(logout_provider, workspace_id: String, provider_id: String);
     stub!(set_provider_api_key, workspace_id: String, provider_id: String, api_key: String);
-    stub!(list_custom_providers);
     stub!(set_custom_provider, workspace_id: String, config: serde_json::Value);
     stub!(delete_custom_provider, workspace_id: String, provider_id: String);
-    stub!(probe_custom_provider_models, input: serde_json::Value);
     stub!(set_enable_skill_commands, workspace_id: String, enabled: bool);
     stub!(set_scoped_model_patterns, workspace_id: String, patterns: Vec<String>);
     stub!(set_skill_enabled, workspace_id: String, file_path: String, enabled: bool);
     stub!(set_extension_enabled, workspace_id: String, file_path: String, enabled: bool);
     stub!(respond_to_host_ui_request, workspace_id: String, session_id: String, response: serde_json::Value);
+
+    #[tauri::command]
+    pub async fn list_custom_providers() -> Result<Vec<serde_json::Value>, String> {
+        Ok(vec![])
+    }
+    #[tauri::command]
+    pub async fn probe_custom_provider_models(_input: serde_json::Value) -> Result<serde_json::Value, String> {
+        Ok(json!({"ok": false, "error": "not available"}))
+    }
+
+    // Composer stubs
     stub!(pick_composer_attachments);
-    stub!(get_notification_permission_status);
-    stub!(request_notification_permission);
-    stub!(open_system_notification_settings);
-    stub!(get_session_tree, target: serde_json::Value);
-    stub!(navigate_session_tree, target: serde_json::Value, target_id: String, options: Option<serde_json::Value>);
-    stub!(list_workspace_files, workspace_id: String, options: Option<serde_json::Value>);
-    stub!(read_workspace_file, workspace_id: String, file_path: String);
-    stub!(get_changed_files, workspace_id: String);
-    stub!(get_file_diff, workspace_id: String, file_path: String);
-    stub!(stage_file, workspace_id: String, file_path: String);
-    stub!(get_theme_mode);
-    stub!(get_resolved_theme);
+
+    // Notification permission stubs
+    #[tauri::command]
+    pub async fn get_notification_permission_status() -> Result<String, String> {
+        Ok("default".into())
+    }
+    #[tauri::command]
+    pub async fn request_notification_permission() -> Result<String, String> {
+        Ok("default".into())
+    }
+    #[tauri::command]
+    pub async fn open_system_notification_settings() -> Result<(), String> {
+        Ok(())
+    }
+
+    // Session tree stubs
+    #[tauri::command]
+    pub async fn get_session_tree(_target: serde_json::Value) -> Result<serde_json::Value, String> {
+        Ok(json!({"id": "", "label": "root", "children": []}))
+    }
+    #[tauri::command]
+    pub async fn navigate_session_tree(store: State<'_, Arc<Store>>, _target: serde_json::Value, _target_id: String, _options: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        Ok(json!({"state": store.state.lock().await.clone(), "result": {"cancelled": false}}))
+    }
+
+    // Workspace files stubs
+    #[tauri::command]
+    pub async fn list_workspace_files(_workspace_id: String, _options: Option<serde_json::Value>) -> Result<Vec<String>, String> {
+        Ok(vec![])
+    }
+    #[tauri::command]
+    pub async fn read_workspace_file(_workspace_id: String, _file_path: String) -> Result<serde_json::Value, String> {
+        Ok(json!({"path": "", "content": "", "truncated": false, "binary": false, "sizeBytes": 0}))
+    }
+    #[tauri::command]
+    pub async fn get_changed_files(_workspace_id: String) -> Result<Vec<serde_json::Value>, String> {
+        Ok(vec![])
+    }
+    #[tauri::command]
+    pub async fn get_file_diff(_workspace_id: String, _file_path: String) -> Result<String, String> {
+        Ok(String::new())
+    }
+    #[tauri::command]
+    pub async fn stage_file(_workspace_id: String, _file_path: String) -> Result<(), String> {
+        Ok(())
+    }
+
+    // Theme stubs
+    #[tauri::command]
+    pub async fn get_theme_mode() -> Result<String, String> {
+        Ok("system".into())
+    }
+    #[tauri::command]
+    pub async fn get_resolved_theme() -> Result<String, String> {
+        Ok("dark".into())
+    }
+
+    // ── Terminal stubs (pty not yet integrated) ──
+    #[tauri::command]
+    pub async fn ensure_terminal_panel(workspace_id: String, terminal_scope_id: String, _size: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        Ok(json!({"workspaceId": workspace_id, "rootKey": terminal_scope_id, "activeSessionId": "", "sessions": []}))
+    }
+    #[tauri::command]
+    pub async fn create_terminal_session(workspace_id: String, terminal_scope_id: String, _size: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        Ok(json!({"workspaceId": workspace_id, "rootKey": terminal_scope_id, "activeSessionId": "", "sessions": []}))
+    }
+    #[tauri::command]
+    pub async fn set_active_terminal_session(workspace_id: String, terminal_scope_id: String, terminal_id: String) -> Result<serde_json::Value, String> {
+        Ok(json!({"workspaceId": workspace_id, "rootKey": terminal_scope_id, "activeSessionId": terminal_id, "sessions": []}))
+    }
+    #[tauri::command]
+    pub async fn write_terminal(_terminal_id: String, _data: String) -> Result<(), String> {
+        Ok(())
+    }
+    #[tauri::command]
+    pub async fn resize_terminal(_terminal_id: String, _size: serde_json::Value) -> Result<(), String> {
+        Ok(())
+    }
+    #[tauri::command]
+    pub async fn restart_terminal_session(terminal_id: String, _size: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        let _ = terminal_id;
+        Ok(json!({"workspaceId": "", "rootKey": "default", "activeSessionId": "", "sessions": []}))
+    }
+    #[tauri::command]
+    pub async fn close_terminal_session(_terminal_id: String) -> Result<Option<serde_json::Value>, String> {
+        Ok(None)
+    }
+    #[tauri::command]
+    pub async fn set_terminal_title(_terminal_id: String, _title: String) -> Result<(), String> {
+        Ok(())
+    }
+    #[tauri::command]
+    pub async fn set_terminal_focused(_focused: bool) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 fn set_sess_field(s: &mut DesktopState, target: &serde_json::Value, field: &str, value: serde_json::Value) {
