@@ -23,7 +23,7 @@
     font-size: 13px;
   }
   .data-table tr:hover td {
-    background: oklch(0.55 0.09 290 / 0.06);
+    background: oklch(0.55 0.16 260 / 0.06);
     color: #e8e8ed;
   }
 
@@ -54,35 +54,35 @@
   }
   [data-slot="dialog-content"] {
     background: var(--color-surface, oklch(1 0 0)) !important;
-    color: var(--color-foreground, oklch(0.2 0 0)) !important;
-    border: 1px solid var(--color-hairline, oklch(0.2 0 0 / 0.06)) !important;
+    color: var(--color-foreground, oklch(0.15 0.008 260)) !important;
+    border: 1px solid var(--color-hairline, oklch(0.15 0.008 260 / 0.05)) !important;
     box-shadow: var(--shadow-terminal-lg) !important;
   }
 
   /* --- Command dialog --- */
   [data-slot="command"] {
     background: transparent !important;
-    color: var(--color-foreground, oklch(0.2 0 0)) !important;
+    color: var(--color-foreground, oklch(0.15 0.008 260)) !important;
   }
   [data-slot="command"] [data-slot="command-input-wrapper"] {
-    background: var(--color-background, oklch(0.97 0 0)) !important;
-    border-radius: var(--radius-input, 18px) !important;
+    background: var(--color-background, oklch(0.975 0.003 260)) !important;
+    border-radius: var(--radius-input, 8px) !important;
   }
   [data-slot="command-input"]::placeholder {
-    color: var(--color-muted, oklch(0.55 0 0)) !important;
+    color: var(--color-muted, oklch(0.55 0.01 260)) !important;
   }
   [data-slot="command-item"][data-selected] {
-    background: var(--color-surface-hover, oklch(0.96 0 0)) !important;
-    color: var(--color-foreground, oklch(0.2 0 0)) !important;
+    background: var(--color-surface-hover, oklch(0.955 0.004 260)) !important;
+    color: var(--color-foreground, oklch(0.15 0.008 260)) !important;
   }
   [data-slot="command-group"] [cmdk-group-heading] {
-    color: var(--color-muted, oklch(0.55 0 0)) !important;
+    color: var(--color-muted, oklch(0.55 0.01 260)) !important;
   }
   [data-slot="command-separator"] {
-    background: var(--color-hairline, oklch(0.2 0 0 / 0.06)) !important;
+    background: var(--color-hairline, oklch(0.15 0.008 260 / 0.05)) !important;
   }
   [data-slot="command-shortcut"] {
-    color: var(--color-muted, oklch(0.55 0 0)) !important;
+    color: var(--color-muted, oklch(0.55 0.01 260)) !important;
   }
 
   /* Input/Textarea 聚焦：去掉 shadcn 默认 ring，避免双层边框 */

@@ -39,7 +39,7 @@
   }
 
   ::selection {
-    background: rgba(127, 119, 221, 0.2);
-    color: var(--color-foreground, oklch(0.2 0 0));
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--color-foreground, oklch(0.15 0.008 260));
   }
 }
