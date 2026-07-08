@@ -1,7 +1,7 @@
 use crate::state::*;
 use crate::state::{
     composer, extensions, git, model, notifications, persistence, providers, session, skills,
-    terminal, theme, timeline, workspace, worktree,
+    theme, timeline, workspace,
 };
 use pi_agent_core::pi_ai_types::ContentBlock;
 use pi_agent_core::types::AgentMessage;
@@ -188,33 +188,6 @@ pub async fn open_extension_in_finder(
         let _ = open::that(&p);
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn create_worktree(
-    store: State<'_, Arc<Store>>,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let ws_id = input["workspaceId"].as_str().unwrap_or("ws-default");
-    let state = store.state.lock().await;
-    let ws_path = workspace::workspace_path(&state, ws_id).ok_or("unknown workspace")?;
-    let target_path = input["path"].as_str().ok_or("missing path")?;
-    let branch = input["branchName"].as_str();
-    drop(state);
-    worktree::create_worktree(&ws_path, target_path, branch)
-}
-
-#[tauri::command]
-pub async fn remove_worktree(
-    store: State<'_, Arc<Store>>,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let ws_id = input["workspaceId"].as_str().unwrap_or("ws-default");
-    let state = store.state.lock().await;
-    let ws_path = workspace::workspace_path(&state, ws_id).ok_or("unknown workspace")?;
-    let target_path = input["path"].as_str().ok_or("missing path")?;
-    drop(state);
-    worktree::remove_worktree(&ws_path, target_path)
 }
 
 #[tauri::command]
@@ -1022,70 +995,6 @@ pub async fn toggle_window_maximize() -> Result<(), String> {
 #[tauri::command]
 pub async fn open_external(url: String) -> Result<(), String> {
     let _ = open::that(&url);
-    Ok(())
-}
-
-// ── Terminal ──
-
-#[tauri::command]
-pub async fn ensure_terminal_panel(
-    workspace_id: String,
-    terminal_scope_id: String,
-    _size: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    Ok(terminal::ensure_terminal_panel(
-        &workspace_id,
-        &terminal_scope_id,
-    ))
-}
-#[tauri::command]
-pub async fn create_terminal_session(
-    workspace_id: String,
-    terminal_scope_id: String,
-    _size: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    Ok(terminal::create_terminal_session(
-        &workspace_id,
-        &terminal_scope_id,
-    ))
-}
-#[tauri::command]
-pub async fn set_active_terminal_session(
-    workspace_id: String,
-    terminal_scope_id: String,
-    terminal_id: String,
-) -> Result<serde_json::Value, String> {
-    let mut p = terminal::ensure_terminal_panel(&workspace_id, &terminal_scope_id);
-    p["activeSessionId"] = json!(terminal_id);
-    Ok(p)
-}
-#[tauri::command]
-pub async fn write_terminal(_terminal_id: String, _data: String) -> Result<(), String> {
-    Ok(())
-}
-#[tauri::command]
-pub async fn resize_terminal(_terminal_id: String, _size: serde_json::Value) -> Result<(), String> {
-    Ok(())
-}
-#[tauri::command]
-pub async fn restart_terminal_session(
-    _terminal_id: String,
-    _size: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    Ok(terminal::ensure_terminal_panel("", "default"))
-}
-#[tauri::command]
-pub async fn close_terminal_session(
-    _terminal_id: String,
-) -> Result<Option<serde_json::Value>, String> {
-    Ok(None)
-}
-#[tauri::command]
-pub async fn set_terminal_title(_terminal_id: String, _title: String) -> Result<(), String> {
-    Ok(())
-}
-#[tauri::command]
-pub async fn set_terminal_focused(_focused: bool) -> Result<(), String> {
     Ok(())
 }
 

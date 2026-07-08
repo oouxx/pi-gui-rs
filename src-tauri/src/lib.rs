@@ -1,7 +1,5 @@
 mod state;
 mod commands;
-mod events;
-mod error;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,11 +24,9 @@ pub fn run() {
             commands::reorder_workspaces,
             commands::reorder_pinned_sessions,
             commands::open_workspace_in_finder,
-            commands::create_worktree,
-            commands::remove_worktree,
+            commands::sync_current_workspace,
             commands::open_skill_in_finder,
             commands::open_extension_in_finder,
-            commands::sync_current_workspace,
             // Session
             commands::select_session,
             commands::archive_session,
@@ -106,16 +102,6 @@ pub fn run() {
             commands::set_theme_preset_id,
             // Transcript
             commands::get_selected_transcript,
-            // Terminal
-            commands::ensure_terminal_panel,
-            commands::create_terminal_session,
-            commands::set_active_terminal_session,
-            commands::write_terminal,
-            commands::resize_terminal,
-            commands::restart_terminal_session,
-            commands::close_terminal_session,
-            commands::set_terminal_title,
-            commands::set_terminal_focused,
             // Model CRUD
             commands::get_models,
             commands::get_providers,
