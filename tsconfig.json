@@ -19,11 +19,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@pi-gui/pi-sdk-driver": ["./src/ambient-stub.ts"],
-      "@pi-gui/pi-sdk-driver/*": ["./src/ambient-stub.ts"],
-      "@pi-gui/session-driver": ["./src/ambient-stub.ts"],
-      "@pi-gui/session-driver/*": ["./src/ambient-stub.ts"],
-      "@pi-gui/catalogs/*": ["./src/ambient-stub.ts"]
     }
   },
   "include": ["src"],

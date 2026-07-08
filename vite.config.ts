@@ -29,12 +29,6 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // pi-gui SDK stubs — Rollup needs real files, not just ambient declarations
-      "@pi-gui/pi-sdk-driver/custom-provider-types": path.resolve(__dirname, "./src/ambient-stub.ts"),
-      "@pi-gui/pi-sdk-driver": path.resolve(__dirname, "./src/ambient-stub.ts"),
-      "@pi-gui/session-driver": path.resolve(__dirname, "./src/ambient-stub.ts"),
-      "@pi-gui/session-driver/types": path.resolve(__dirname, "./src/ambient-stub.ts"),
-      "@pi-gui/session-driver/runtime-types": path.resolve(__dirname, "./src/ambient-stub.ts"),
     },
   },
 }));

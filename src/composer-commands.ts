@@ -1,10 +1,10 @@
-import type { SessionConfig } from "@pi-gui/session-driver";
+import type { SessionConfig } from "./sdk-types";
 import type {
   RuntimeCommandRecord,
   RuntimeProviderRecord,
   RuntimeSettingsSnapshot,
   RuntimeSnapshot,
-} from "@pi-gui/session-driver/runtime-types";
+} from "./sdk-types";
 import type { ExtensionCommandCompatibilityRecord } from "./types";
 import { titleCase } from "./string-utils";
 

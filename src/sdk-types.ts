@@ -1,4 +1,4 @@
-/* ── Stub module for @pi-gui/* SDK packages ───────────── */
+/* ── Inline SDK type definitions ───────────────────────────── */
 
 export interface SessionTranscriptMessage {
   id: string;
