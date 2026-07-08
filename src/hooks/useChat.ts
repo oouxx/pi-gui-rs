@@ -47,18 +47,20 @@ export function useChat() {
       if (ws) activeWsIdRef.current = ws.id;
       setWorkspaces(
         state.workspaces
-          .filter((w: any) => w.sessions?.length > 0)
           .map((w: any) => ({
             id: w.id,
             name: w.name || w.path?.split("/").pop() || w.id,
             path: w.path || "",
-            sessions: (w.sessions ?? []).map((s: any) => ({
-              id: s.id,
-              title: s.title || "Untitled",
-              updatedAt: s.updatedAt,
-              status: s.status,
-            })),
-          })),
+            sessions: (w.sessions ?? [])
+              .filter((s: any) => !s.archivedAt)
+              .map((s: any) => ({
+                id: s.id,
+                title: s.title || "Untitled",
+                updatedAt: s.updatedAt,
+                status: s.status,
+              })),
+          }))
+          .filter((w: any) => w.sessions.length > 0),
       );
       if (
         state.selectedSessionId &&
@@ -207,16 +209,18 @@ export function useChat() {
   const deleteSession = useCallback(
     async (sessionId: string) => {
       const api = window.piApp;
-
       if (!api || !activeWsIdRef.current) return;
-      await api.archiveSession({
+      const newState = await api.archiveSession({
         workspaceId: activeWsIdRef.current,
         sessionId,
       });
-      if (activeSessionId === sessionId) setActiveSessionId(null);
+      // Backend may have auto-selected the next session — sync it
+      if (newState.selectedSessionId) {
+        setActiveSessionId(newState.selectedSessionId);
+      }
       refreshState();
     },
-    [activeSessionId, refreshState],
+    [refreshState],
   );
 
   const sessions = workspaces.flatMap((w) => w.sessions)
