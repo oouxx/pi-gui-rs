@@ -4,7 +4,7 @@ import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup,
   SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { Search, Plus, Settings, Puzzle, MessageSquare } from "lucide-react"
+import { Search, Plus, Settings, Puzzle, Code2 } from "lucide-react"
 import { useAppMode } from "@/contexts/AppModeContext"
 import { useChat } from "@/hooks/useChat"
 
@@ -32,6 +32,16 @@ export default function PiSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => setMode(mode === "skills" ? "chat" : "skills")}
+                isActive={mode === "skills"}
+                tooltip="Skills"
+              >
+                <Code2 />
+                <span>Skills</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 onClick={() => setMode(mode === "extensions" ? "chat" : "extensions")}
