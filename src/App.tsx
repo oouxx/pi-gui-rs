@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { Routes, Route, Navigate } from "react-router-dom"
 import { AppModeProvider } from "./contexts/AppModeContext"
 import AppShell from "./components/AppShell"
 

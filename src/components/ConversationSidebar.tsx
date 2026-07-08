@@ -6,10 +6,16 @@ import {
 } from "@/components/ui/sidebar"
 import { Search, Plus, Settings, Puzzle, MessageSquare } from "lucide-react"
 import { useAppMode } from "@/contexts/AppModeContext"
+import { useChat } from "@/hooks/useChat"
 
 export default function ConversationSidebar() {
   const { mode, setMode } = useAppMode()
+  const { sessions, activeSessionId, selectSession, loading } = useChat()
   const [search, setSearch] = useState("")
+
+  const filtered = search.trim()
+    ? sessions.filter((s) => s.title.toLowerCase().includes(search.trim().toLowerCase()))
+    : sessions
 
   return (
     <Sidebar collapsible="icon">
@@ -48,9 +54,33 @@ export default function ConversationSidebar() {
         </SidebarGroup>
         <SidebarGroup className="min-h-0 flex-1">
           <SidebarMenu>
-            <div className="text-muted-foreground py-8 text-center text-xs group-data-[collapsible=icon]:hidden">
-              No sessions yet
-            </div>
+            {loading ? (
+              <div className="text-muted-foreground py-8 text-center text-xs group-data-[collapsible=icon]:hidden">
+                Loading...
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-muted-foreground py-8 text-center text-xs group-data-[collapsible=icon]:hidden">
+                {search.trim() ? "No matching sessions" : "No sessions yet"}
+              </div>
+            ) : (
+              filtered.map((s) => (
+                <SidebarMenuItem key={s.id}>
+                  <SidebarMenuButton
+                    isActive={activeSessionId === s.id}
+                    onClick={() => {
+                      setMode("chat")
+                      selectSession(s.id)
+                    }}
+                    tooltip={s.title}
+                  >
+                    <span
+                      className={`size-1.5 flex-shrink-0 rounded-full ${activeSessionId === s.id ? "bg-accent" : "bg-muted-foreground"}`}
+                    />
+                    <span className="flex-1 truncate">{s.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))
+            )}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
