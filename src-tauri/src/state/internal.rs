@@ -149,9 +149,7 @@ impl Store {
     }
 
     pub fn new_with_runtime() -> Arc<Self> {
-        // Restore active IDs and attach the default workspace + runtime
-        // snapshot.  Session lists are ephemeral — they come from the
-        // in-memory state and are set by API calls, not persisted.
+        // Restore active IDs, scan JSONL files for existing sessions.
         let restored = persistence::restore_state();
         let store = Self::new();
         {
@@ -163,6 +161,9 @@ impl Store {
             if let Some(sess_id) = restored["selectedSessionId"].as_str().filter(|x| !x.is_empty()) {
                 s["selectedSessionId"] = json!(sess_id);
             }
+            // Scan for existing session files on disk
+            let scanned = super::session::scan_existing_sessions();
+            s["workspaces"][0]["sessions"] = json!(scanned);
             s["runtimeByWorkspace"]["ws-default"] =
                 super::runtime::build_runtime_snapshot();
             let rev = s["revision"].as_u64().unwrap_or(0) + 1;
