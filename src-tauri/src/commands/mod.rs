@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use pi_agent_core::pi_ai_types::ContentBlock;
 use pi_agent_core::types::AgentMessage;
 use crate::state::*;
-use crate::state::{worktree, workspace, session, composer, model, theme, notifications, git, terminal, timeline, providers, persistence};
+use crate::state::{worktree, workspace, session, composer, model, theme, notifications, git, terminal, timeline, providers, persistence, skills, extensions};
 
 
     // ── Core ──
@@ -672,3 +672,81 @@ use crate::state::{worktree, workspace, session, composer, model, theme, notific
     pub async fn set_terminal_title(_terminal_id: String, _title: String) -> Result<(), String> { Ok(()) }
     #[tauri::command]
     pub async fn set_terminal_focused(_focused: bool) -> Result<(), String> { Ok(()) }
+
+    // ── Model CRUD ──
+
+    #[tauri::command]
+    pub async fn get_models(store: State<'_, Arc<Store>>, workspace_id: String) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let snapshot = state["runtimeByWorkspace"][&workspace_id].clone();
+        let models = snapshot["models"].as_array().cloned().unwrap_or_default();
+        Ok(json!({"models": models}))
+    }
+
+    #[tauri::command]
+    pub async fn get_providers(store: State<'_, Arc<Store>>, workspace_id: String) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let snapshot = state["runtimeByWorkspace"][&workspace_id].clone();
+        let providers_list = snapshot["providers"].as_array().cloned().unwrap_or_default();
+        Ok(json!({"providers": providers_list}))
+    }
+
+    #[tauri::command]
+    pub async fn get_model_settings(store: State<'_, Arc<Store>>, workspace_id: String) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let settings = state["runtimeByWorkspace"][&workspace_id]["settings"].clone();
+        let global = state["globalModelSettings"].clone();
+        Ok(json!({"settings": settings, "globalModelSettings": global}))
+    }
+
+    // ── Skill CRUD ──
+
+    #[tauri::command]
+    pub async fn list_skills(store: State<'_, Arc<Store>>, workspace_id: String) -> Result<Vec<serde_json::Value>, String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        Ok(skills::list_skills(ws_path.as_deref(), &workspace_id))
+    }
+
+    #[tauri::command]
+    pub async fn get_skill(store: State<'_, Arc<Store>>, workspace_id: String, name: String) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        skills::get_skill(ws_path.as_deref(), &workspace_id, &name).ok_or_else(|| format!("skill '{name}' not found"))
+    }
+
+    #[tauri::command]
+    pub async fn delete_skill(store: State<'_, Arc<Store>>, workspace_id: String, name: String) -> Result<(), String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        skills::delete_skill(ws_path.as_deref(), &name)
+    }
+
+    // ── Extension CRUD ──
+
+    #[tauri::command]
+    pub async fn list_extensions(store: State<'_, Arc<Store>>, workspace_id: String) -> Result<Vec<serde_json::Value>, String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        Ok(extensions::list_extensions(ws_path.as_deref(), &workspace_id))
+    }
+
+    #[tauri::command]
+    pub async fn get_extension(store: State<'_, Arc<Store>>, workspace_id: String, name: String) -> Result<serde_json::Value, String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        extensions::get_extension(ws_path.as_deref(), &workspace_id, &name).ok_or_else(|| format!("extension '{name}' not found"))
+    }
+
+    #[tauri::command]
+    pub async fn delete_extension(store: State<'_, Arc<Store>>, workspace_id: String, name: String) -> Result<(), String> {
+        let state = store.state.lock().await;
+        let ws_path = workspace::workspace_path(&state, &workspace_id);
+        drop(state);
+        extensions::delete_extension(ws_path.as_deref(), &name)
+    }

@@ -112,6 +112,18 @@ pub fn run() {
             commands::close_terminal_session,
             commands::set_terminal_title,
             commands::set_terminal_focused,
+            // Model CRUD
+            commands::get_models,
+            commands::get_providers,
+            commands::get_model_settings,
+            // Skill CRUD
+            commands::list_skills,
+            commands::get_skill,
+            commands::delete_skill,
+            // Extension CRUD
+            commands::list_extensions,
+            commands::get_extension,
+            commands::delete_extension,
         ])
         .run(tauri::generate_context!())
         .expect("error while running pi-gui-rs");

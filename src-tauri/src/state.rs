@@ -13,6 +13,8 @@ pub(crate) mod worktree;
 pub(crate) mod timeline;
 pub(crate) mod providers;
 pub(crate) mod persistence;
+pub(crate) mod skills;
+pub(crate) mod extensions;
 
 pub use internal::*;
 pub use runtime::build_runtime_snapshot;
