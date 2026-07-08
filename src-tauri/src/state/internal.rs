@@ -149,20 +149,25 @@ impl Store {
     }
 
     pub fn new_with_runtime() -> Arc<Self> {
-        // Restore persisted state on top of defaults, so user's sessions
-        // and settings survive restarts.
+        // Restore active IDs and attach the default workspace + runtime
+        // snapshot.  Session lists are ephemeral — they come from the
+        // in-memory state and are set by API calls, not persisted.
         let restored = persistence::restore_state();
         let store = Self::new();
         {
             let mut state = store.state.blocking_lock();
-            *state = restored;
-            // Always refresh runtime (provider lists, env keys) on startup,
-            // but keep user-level settings that the persisted state carries.
-            state["runtimeByWorkspace"]["ws-default"] =
+            let mut s = default_state();
+            if let Some(ws_id) = restored["selectedWorkspaceId"].as_str().filter(|x| !x.is_empty()) {
+                s["selectedWorkspaceId"] = json!(ws_id);
+            }
+            if let Some(sess_id) = restored["selectedSessionId"].as_str().filter(|x| !x.is_empty()) {
+                s["selectedSessionId"] = json!(sess_id);
+            }
+            s["runtimeByWorkspace"]["ws-default"] =
                 super::runtime::build_runtime_snapshot();
-            // Bump revision so the frontend knows the server restarted.
-            let rev = state["revision"].as_u64().unwrap_or(0) + 1;
-            state["revision"] = json!(rev);
+            let rev = s["revision"].as_u64().unwrap_or(0) + 1;
+            s["revision"] = json!(rev);
+            *state = s;
         }
         store
     }
