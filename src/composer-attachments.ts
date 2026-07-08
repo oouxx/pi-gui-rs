@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import type { ComposerAttachment, ComposerFileAttachment, ComposerImageAttachment } from "./desktop-state";
+import type { ComposerAttachment, ComposerFileAttachment, ComposerImageAttachment } from "./types";
 
 export const SUPPORTED_COMPOSER_IMAGE_TYPES = [
   { extension: "png", mimeType: "image/png" },

@@ -1,4 +1,4 @@
-import { type ThemePresetId } from "./desktop-state";
+import { type ThemePresetId } from "./types";
 
 export type ResolvedTheme = "light" | "dark";
 

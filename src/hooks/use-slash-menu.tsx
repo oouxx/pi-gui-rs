@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import type { RuntimeCommandRecord, RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
-import type { DesktopAppState, ExtensionCommandCompatibilityRecord, SessionRecord, WorkspaceRecord } from "../desktop-state";
+import type { DesktopAppState, ExtensionCommandCompatibilityRecord, SessionRecord, WorkspaceRecord } from "../types";
 import {
   buildModelOptions,
   isExactSlashCommand,
@@ -13,9 +13,9 @@ import {
   type ComposerSlashOptionEmptyState,
   type ComposerSlashOption,
 } from "../composer-commands";
-import type { PiDesktopApi } from "../ipc";
+import type { PiDesktopApi } from "../types";
 import { deriveModelOnboardingState } from "../model-onboarding";
-import type { SettingsSection } from "../settings-view";
+import type { SettingsSection } from "../settings-utils";
 
 interface ActiveSlashFlow {
   readonly command: ComposerSlashCommand;

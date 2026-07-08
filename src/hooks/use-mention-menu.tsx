@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import type { RuntimeExtensionRecord, RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
-import { extensionSourceSummary } from "../extension-display";
-import type { PiDesktopApi } from "../ipc";
+import type { PiDesktopApi } from "../types";
+
+function extensionSourceSummary() { return ""; }
 import { nextMenuIndex } from "./use-slash-menu";
 
 export type MentionOption =

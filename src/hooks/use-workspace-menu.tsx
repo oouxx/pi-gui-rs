@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from "react";
-import type { DesktopAppState, WorkspaceRecord, WorktreeRecord } from "../desktop-state";
-import type { PiDesktopApi } from "../ipc";
+import type { DesktopAppState, WorkspaceRecord, WorktreeRecord } from "../types";
+import type { PiDesktopApi } from "../types";
 
 interface UseWorkspaceMenuParams {
   readonly api: PiDesktopApi | undefined;

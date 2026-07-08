@@ -3,8 +3,8 @@ import type { ModelSettingsSnapshot, RuntimeCommandRecord, RuntimeSnapshot } fro
 import type { SessionSchemaInfo } from "@pi-gui/pi-sdk-driver";
 export type { SessionSchemaInfo } from "@pi-gui/pi-sdk-driver";
 export type SessionStatus = "idle" | "running" | "failed";
-export type { SessionRole, TimelineToolCall, TranscriptMessage } from "./timeline-types";
-import type { TranscriptMessage } from "./timeline-types";
+export type { SessionRole, TimelineToolCall, TranscriptMessage } from "./timeline";
+import type { TranscriptMessage } from "./timeline";
 
 export type AppView = "threads" | "new-thread" | "skills" | "extensions" | "settings";
 export type WorkspaceKind = "primary" | "worktree";
@@ -31,6 +31,7 @@ export function isThemeMode(value: unknown): value is ThemeMode {
 export function isThemePresetId(value: unknown): value is ThemePresetId {
   return typeof value === "string" && themePresetIds.includes(value as ThemePresetId);
 }
+
 export type ComposerDraftSyncSource =
   | "state"
   | "selection"
@@ -187,8 +188,6 @@ export interface SelectedTranscriptRecord {
   readonly workspaceId: string;
   readonly sessionId: string;
   readonly transcript: readonly TranscriptMessage[];
-  // Session-file schema-version skew, when known. `writtenByNewerRuntime` drives the version-skew
-  // notice; undefined until the (async, static-per-session) header read resolves.
   readonly schemaInfo?: SessionSchemaInfo;
 }
 
@@ -270,15 +269,10 @@ export type ForkThreadPosition = "before" | "at" | "after";
 export type ForkThreadInput = {
   readonly sourceWorkspaceId: string;
   readonly sourceSessionId: string;
-  /** Root workspace used as the base when forking into a new worktree. */
   readonly rootWorkspaceId: string;
-  /** "local" forks into the source workspace; "worktree" creates a new worktree. */
   readonly environment: NewThreadEnvironment;
-  /** ID of the rendered transcript message selected as the fork point, when it maps to a session entry. */
   readonly sourceMessageId?: string;
-  /** 0-based index of the rendered transcript message selected as the fork point. */
   readonly sourceMessageIndex?: number;
-  /** 0-based rendered user-message index kept as a fallback for older callers. */
   readonly userMessageIndex?: number;
   readonly position?: ForkThreadPosition;
 };
@@ -329,51 +323,4 @@ export interface CreateSessionInput {
 export interface WorkspaceSessionTarget {
   readonly workspaceId: string;
   readonly sessionId: string;
-}
-
-export function createEmptyDesktopAppState(): DesktopAppState {
-  return {
-    workspaces: [],
-    worktreesByWorkspace: {},
-    selectedWorkspaceId: "",
-    selectedSessionId: "",
-    activeView: "threads",
-    composerDraft: "",
-    composerDraftSyncSource: "state",
-    composerDraftSyncNonce: 0,
-    composerAttachments: [],
-    queuedComposerMessages: [],
-    runtimeByWorkspace: {},
-    sessionCommandsBySession: {},
-    sessionExtensionUiBySession: {},
-    extensionCommandCompatibilityByWorkspace: {},
-    orchestrationChildren: [],
-    notificationPreferences: {
-      backgroundCompletion: true,
-      backgroundFailure: true,
-      attentionNeeded: true,
-    },
-    integratedTerminalShell: "",
-    lastViewedAtBySession: {},
-    pinnedAtBySession: {},
-    pinnedSessionOrder: [],
-    workspaceOrder: [],
-    modelSettingsScopeMode: "app-global",
-    globalModelSettings: {
-      enabledModelPatterns: [],
-    },
-    themeMode: "system",
-    themePresetId: "default",
-    sidebarCollapsed: false,
-    enableTransparency: false,
-    revision: 0,
-  };
-}
-
-export function getSelectedWorkspace(state: DesktopAppState): WorkspaceRecord | undefined {
-  return state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceId);
-}
-
-export function getSelectedSession(state: DesktopAppState): SessionRecord | undefined {
-  return getSelectedWorkspace(state)?.sessions.find((session) => session.id === state.selectedSessionId);
 }

@@ -1,9 +1,5 @@
-import {
-  getSelectedWorkspace,
-  type DesktopAppState,
-  type WorkspaceRecord,
-  type WorktreeRecord,
-} from "./desktop-state";
+import { getSelectedWorkspace } from "./stores/app";
+import type { DesktopAppState, WorkspaceRecord, WorktreeRecord } from "./types";
 import { resolveRepoWorkspaceId } from "./workspace-roots";
 
 export interface WorkspaceContext {

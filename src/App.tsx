@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DesktopAppState } from "./desktop-state";
+import type { DesktopAppState } from "./types";
 
 function useDesktopAppState() {
   const [snapshot, setSnapshot] = useState<DesktopAppState | null>(null);

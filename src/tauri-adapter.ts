@@ -1,30 +1,43 @@
 /**
- * Tauri adapter — thin proxy: each PiDesktopApi method directly forwards to a Tauri invoke.
+ * Tauri adapter — provides PiDesktopApi backed by Tauri invoke/events.
  *
- * Architecture matches the original Electron preload.ts:
- *   Electron: piApp.xxx → ipcRenderer.invoke(channel) → main process handler
- *   Tauri:    piApp.xxx → invoke("xxx")               → Rust command handler
- *
- * When Tauri IPC is unavailable (browser dev), a lightweight BrowserApi fallback
- * provides mock state for UI testing.
+ * In production this is a thin proxy over api/commands and api/events.
+ * In browser dev mode (no Tauri IPC) a lightweight BrowserApi fallback provides
+ * mock state for UI testing.
  */
-
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const ipc = (window as any).__TAURI_INTERNALS__;
-  console.log(`[IPC →] ${cmd}`, args);
-  const result = await (ipc.invoke(cmd, args) as Promise<T>);
-  console.log(`[IPC ←] ${cmd}`, result);
-  return result;
-}
-
-async function tauriListen<T>(event: string, handler: (event: { payload: T }) => void) {
-  const { listen } = await import("@tauri-apps/api/event");
-  return listen(event, handler);
-}
-
-import type { DesktopAppState, SelectedTranscriptRecord } from "./desktop-state";
-import { createEmptyDesktopAppState } from "./desktop-state";
-import type { PiDesktopApi, DesktopPlatform } from "./ipc";
+import type { DesktopAppState, SelectedTranscriptRecord } from "./types";
+import type {
+  DesktopPlatform,
+  PiDesktopApi,
+  ComposerImageAttachment,
+  ComposerAttachment,
+  WorkspaceSessionTarget,
+  CreateSessionInput,
+  StartThreadInput,
+  ForkThreadInput,
+  CreateWorktreeInput,
+  RemoveWorktreeInput,
+  SendChildThreadFollowUpInput,
+  SetChildSupervisionLoopInput,
+  ThemePresetId,
+  ModelSettingsScopeMode,
+  NotificationPreferences,
+  CustomProviderConfig,
+  CustomProviderProbeInput,
+  CustomProviderProbeResult,
+  TerminalPanelSnapshot,
+  TerminalSize,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalErrorEvent,
+  DesktopNotificationPermissionStatus,
+} from "./types";
+import { createEmptyDesktopAppState } from "./stores/app";
+import {
+  tauriInvoke, getDesktopShortcutLabel, getDesktopCommandFromShortcut,
+  desktopIpc,
+} from "./api/commands";
+import { tauriListen } from "./api/events";
 
 // ── Browser mode helpers ────────────────────────────────────
 
@@ -36,7 +49,6 @@ function createBrowserApi(): PiDesktopApi {
   const listeners = new Set<(state: DesktopAppState) => void>();
   function emit(s: DesktopAppState) { listeners.forEach((fn) => fn(s)); }
 
-  // ponytail: browser-mode transcript — in-memory array, no persistence
   const transcriptListeners = new Set<(t: SelectedTranscriptRecord | null) => void>();
   let browserMessages: Array<{id: string; kind: "message"; role: "user" | "assistant"; text: string; createdAt: string}> = [];
   function getBrowserTranscript(): SelectedTranscriptRecord | null {
@@ -84,8 +96,6 @@ function createBrowserApi(): PiDesktopApi {
     return state;
   }
 
-  type SetState<T> = (arg: T) => Promise<DesktopAppState>;
-
   return {
     platform: "darwin" as DesktopPlatform,
     versions: {},
@@ -108,8 +118,8 @@ function createBrowserApi(): PiDesktopApi {
     reorderWorkspaces: async (o) => update({ workspaces: o.map((id) => state.workspaces.find((w) => w.id === id)).filter(Boolean) as any }),
     reorderPinnedSessions: async () => state,
     openWorkspaceInFinder: async () => {},
-    createWorktree: async (input) => state,
-    removeWorktree: async (input) => state,
+    createWorktree: async () => state,
+    removeWorktree: async () => state,
     openSkillInFinder: async () => {},
     openExtensionInFinder: async () => {},
     syncCurrentWorkspace: async () => state,
@@ -189,7 +199,6 @@ function createBrowserApi(): PiDesktopApi {
     submitComposer: async (text, _options) => {
       const ts = nowISO();
       browserMessages = [...browserMessages, { id: `msg-${Date.now()}`, kind: "message", role: "user", text, createdAt: ts }];
-      // ponytail: mock assistant reply after a short delay
       setTimeout(() => {
         browserMessages = [...browserMessages, { id: `msg-${Date.now()}-a`, kind: "message", role: "assistant", text: `Echo: ${text}`, createdAt: nowISO() }];
         transcriptListeners.forEach((fn) => fn(getBrowserTranscript()));
@@ -244,13 +253,12 @@ export async function createTauriPiApp(): Promise<PiDesktopApi> {
 
   (async () => {
     try {
-      const unsubState = await tauriListen<DesktopAppState>("pi-gui:state-changed", (e) => {
-        stateListeners.forEach((fn) => fn(e.payload));
+      const unsubState = await tauriListen<DesktopAppState>(desktopIpc.stateChanged, (e) => {
+        stateListeners.forEach((fn) => fn(e));
       });
-      const unsubTranscript = await tauriListen<SelectedTranscriptRecord | null>("pi-gui:selected-transcript-changed", (e) => {
-        transcriptListeners.forEach((fn) => fn(e.payload));
+      const unsubTranscript = await tauriListen<SelectedTranscriptRecord | null>(desktopIpc.selectedTranscriptChanged, (e) => {
+        transcriptListeners.forEach((fn) => fn(e));
       });
-      // Agent events — transcript is pushed directly via pi-gui:selected-transcript-changed
       await tauriListen<any>("agent-event", () => {});
     } catch (e) {
       console.warn("tauri-adapter: event listener setup failed:", e);
