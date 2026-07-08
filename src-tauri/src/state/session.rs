@@ -48,6 +48,10 @@ pub fn scan_existing_sessions() -> Vec<serde_json::Value> {
 
 /// Read transcript messages directly from a JSONL session file (append-only).
 /// Returns the messages as a JSON array of {id, kind, role, text, createdAt}.
+/// Read transcript messages directly from a JSONL session file (append-only).
+/// Format per line:
+///   {"type":"session","cwd":"..."}  ← header, skipped
+///   {"type":"message","message":{"content":[{"text":"..."}],"role":"user|assistant"}}
 pub fn read_transcript_from_file(path: &str) -> Vec<serde_json::Value> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -55,76 +59,60 @@ pub fn read_transcript_from_file(path: &str) -> Vec<serde_json::Value> {
     };
     let mut messages = Vec::new();
     for line in content.lines() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            // Header entries have "id"/"cwd"/"timestamp" — skip
-            if val.get("cwd").is_some() { continue; }
-            // Extract entries array
-            let entries = match val.get("entries").and_then(|e| e.as_array()) {
-                Some(a) => a,
-                None => continue,
-            };
-            for entry in entries {
-                let msg = match entry.get("message") {
-                    Some(m) => m,
-                    None => continue,
-                };
-                let role = match msg.get("role").and_then(|r| r.as_str()) {
-                    Some("user") => "user",
-                    Some("assistant") => "assistant",
-                    _ => continue,
-                };
-                let text: String = msg.get("content")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let ts = entry.get("timestamp")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("");
-                messages.push(json!({
-                    "id": format!("msg-{}", messages.len()),
-                    "kind": "message",
-                    "role": role,
-                    "text": text,
-                    "createdAt": ts,
-                }));
-            }
-        }
+        let val: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        // Skip header lines (type=session)
+        if val.get("type").and_then(|t| t.as_str()) == Some("session") { continue; }
+        // Extract message object
+        let msg = match val.get("message") {
+            Some(m) => m,
+            None => continue,
+        };
+        let role = match msg.get("role").and_then(|r| r.as_str()) {
+            Some("user") => "user",
+            Some("assistant") => "assistant",
+            _ => continue,
+        };
+        // content is an array of blocks like [{"text":"...","type":"text"}]
+        let text: String = msg.get("content").and_then(|c| c.as_array())
+            .map(|arr| arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect())
+            .unwrap_or_default();
+        let ts = val.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
+        messages.push(json!({
+            "id": format!("msg-{}", messages.len()),
+            "kind": "message",
+            "role": role,
+            "text": text,
+            "createdAt": ts,
+        }));
     }
     messages
 }
 
-/// Try to extract a human-readable title from a JSONL session file.
-/// Reads the first few lines looking for a name/header entry.
+/// Extract a title from the first user message in a JSONL session file.
 fn extract_session_title(path: &PathBuf) -> String {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string(),
     };
-    // Look for the header's name field
-    for line in content.lines().take(5) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(name) = val.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()) {
-                return name.to_string();
-            }
-        }
-    }
-    // Fallback: first user message text
     for line in content.lines() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(entries) = val.get("entries").and_then(|e| e.as_array()) {
-                for entry in entries {
-                    if let Some(msg) = entry.get("message") {
-                        if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
-                            if let Some(text) = msg.get("content").and_then(|c| c.as_str()).filter(|t| !t.is_empty()) {
-                                return text.chars().take(60).collect();
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let val: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if val.get("type").and_then(|t| t.as_str()) != Some("message") { continue; }
+        let msg = match val.get("message") {
+            Some(m) => m,
+            None => continue,
+        };
+        if msg.get("role").and_then(|r| r.as_str()) != Some("user") { continue; }
+        let text: String = msg.get("content").and_then(|c| c.as_array())
+            .map(|arr| arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect())
+            .unwrap_or_default();
+        if !text.is_empty() { return text.chars().take(60).collect(); }
     }
-    // Ultimate fallback: filename stem
     path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string()
 }
 
