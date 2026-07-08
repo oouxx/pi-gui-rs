@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import type { RuntimeExtensionRecord, RuntimeSnapshot } from "./sdk-types";
+import type { RuntimeExtensionRecord, RuntimeSnapshot } from "../sdk-types";
 import type { PiDesktopApi } from "../types";
 
 function extensionSourceSummary() { return ""; }

@@ -1,4 +1,4 @@
-import type { SessionTranscriptMessage, SessionTranscriptRole } from "./sdk-types";
+import type { SessionTranscriptMessage, SessionTranscriptRole } from "../sdk-types";
 
 export type SessionRole = SessionTranscriptRole;
 export type TimelineTone = "neutral" | "success" | "warning" | "error";

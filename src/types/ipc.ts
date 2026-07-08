@@ -156,7 +156,7 @@ export interface PiDesktopApi {
   setDefaultModel(workspaceId: string, provider: string, modelId: string): Promise<DesktopAppState>;
   setDefaultThinkingLevel(
     workspaceId: string,
-    thinkingLevel: import("./sdk-types").RuntimeSettingsSnapshot["defaultThinkingLevel"],
+    thinkingLevel: import("../sdk-types").RuntimeSettingsSnapshot["defaultThinkingLevel"],
   ): Promise<DesktopAppState>;
   setSessionModel(
     workspaceId: string,
@@ -167,7 +167,7 @@ export interface PiDesktopApi {
   setSessionThinkingLevel(
     workspaceId: string,
     sessionId: string,
-    thinkingLevel: NonNullable<import("./sdk-types").RuntimeSettingsSnapshot["defaultThinkingLevel"]>,
+    thinkingLevel: NonNullable<import("../sdk-types").RuntimeSettingsSnapshot["defaultThinkingLevel"]>,
   ): Promise<DesktopAppState>;
   loginProvider(workspaceId: string, providerId: string): Promise<DesktopAppState>;
   logoutProvider(workspaceId: string, providerId: string): Promise<DesktopAppState>;
@@ -244,12 +244,12 @@ export interface PiDesktopApi {
   steerQueuedComposerMessage(messageId: string): Promise<DesktopAppState>;
   updateComposerDraft(composerDraft: string): Promise<DesktopAppState>;
   submitComposer(text: string, options?: { readonly deliverAs?: "steer" | "followUp" }): Promise<DesktopAppState>;
-  getSessionTree(target: WorkspaceSessionTarget): Promise<import("./sdk-types").SessionTreeSnapshot>;
+  getSessionTree(target: WorkspaceSessionTarget): Promise<import("../sdk-types").SessionTreeSnapshot>;
   navigateSessionTree(
     target: WorkspaceSessionTarget,
     targetId: string,
-    options?: import("./sdk-types").NavigateSessionTreeOptions,
-  ): Promise<{ readonly state: DesktopAppState; readonly result: import("./sdk-types").NavigateSessionTreeResult }>;
+    options?: import("../sdk-types").NavigateSessionTreeOptions,
+  ): Promise<{ readonly state: DesktopAppState; readonly result: import("../sdk-types").NavigateSessionTreeResult }>;
   listWorkspaceFiles(workspaceId: string, options?: { readonly force?: boolean }): Promise<string[]>;
   readWorkspaceFile(workspaceId: string, filePath: string): Promise<WorkspaceFilePreview>;
   getChangedFiles(workspaceId: string): Promise<ChangedFileEntry[]>;
