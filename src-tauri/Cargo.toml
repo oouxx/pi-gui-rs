@@ -9,18 +9,14 @@ edition = "2021"
 name = "pi_rs_gui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[patch."https://github.com/oouxx/pi-rs"]
-pi-coding-agent = { path = "/Users/xinxing/Desktop/github/pi-rs/crates/pi-coding-agent" }
-pi-agent-core = { path = "/Users/xinxing/Desktop/github/pi-rs/crates/pi-agent-core" }
-pi-ai = { path = "/Users/xinxing/Desktop/github/pi-rs/crates/pi-ai" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-pi-coding-agent = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.15"}
-pi-agent-core = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.15"}
-pi-ai = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.15"}
+pi-coding-agent = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.17"}
+pi-agent-core = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.17"}
+pi-ai = { git = "https://github.com/oouxx/pi-rs", tag = "v1.78.17"}
 tauri = { version = "2", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
