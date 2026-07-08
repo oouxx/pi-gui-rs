@@ -162,8 +162,84 @@ impl Store {
         result
     }
 
+    /// Attach an AgentSession to an EXISTING session record (no duplicate push).
+    /// Used by submit_composer after the frontend has already called createSession.
+    /// If `session_file` is provided, loads existing JSONL; otherwise creates fresh.
+    pub async fn attach_agent_session(self: &Arc<Self>, app: &AppHandle, cwd: &str, current_sid: &str, session_file: Option<String>) -> Result<(), String> {
+        pi_ai::providers::register_builtins::register_built_in_api_providers();
+
+        let (provider, model_id, thinking_level) = {
+            let state = self.state.lock().await;
+            let ws_id = state["selectedWorkspaceId"].as_str().unwrap_or("ws-default").to_string();
+            (
+                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"].as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"].as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultThinkingLevel"].as_str().map(|s| s.to_string()),
+            )
+        };
+
+        use pi_coding_agent::core::model_registry::ModelRegistry;
+        let registry = ModelRegistry::new(ModelRegistry::builtin_models_list());
+        let initial_model = provider.as_ref()
+            .and_then(|p| model_id.as_ref().and_then(|m| registry.find(p, m)));
+        let stream_fn = pi_coding_agent::core::sdk::create_default_stream_fn();
+
+        let opts = CreateAgentSessionOptions {
+            cwd: cwd.to_string(), agent_dir: None,
+            model: initial_model.clone(), thinking_level,
+            scoped_models: None, no_tools: None, tools: None, exclude_tools: None,
+            custom_prompt: None, append_system_prompt: None, session_name: None,
+            stream_fn: Some(stream_fn.clone()), convert_to_llm: None, extension_paths: vec![],
+            enable_extensions: false, cli_provider: None, cli_model: None,
+            persist_session: true,
+            session_file: session_file.clone(),
+        };
+        let (mut session, _result) = create_agent_session(opts).await.map_err(|e| format!("{e}"))?;
+
+        let sess_file_path = session.get_session_manager().get_session_file()
+            .map(|p| p.to_string_lossy().to_string());
+        let sid = current_sid.to_string();
+        *self.session_id.lock().await = Some(sid.clone());
+        // Update the existing session record with sessionFile path
+        self.mutate(app, |s| {
+            let ws_id = s["selectedWorkspaceId"].as_str().unwrap_or("ws-default").to_string();
+            if let Some(sessions) = s["workspaces"].as_array_mut()
+                .and_then(|ws| ws.iter_mut().find(|w| w["id"] == ws_id))
+                .and_then(|w| w["sessions"].as_array_mut())
+            {
+                if let Some(sess) = sessions.iter_mut().find(|s| s["id"] == sid) {
+                    if let Some(fp) = &sess_file_path {
+                        sess["sessionFile"] = json!(fp);
+                    }
+                }
+            }
+            s["selectedSessionId"] = json!(&sid);
+        }).await;
+
+        let store = self.clone();
+        let a = app.clone();
+        let sid2 = sid.clone();
+        session.subscribe(Arc::new(move |event: AgentEvent, _signal| {
+            let store = store.clone();
+            let app = a.clone();
+            let sid = sid2.clone();
+            Box::pin(async move {
+                let (et, data) = serialize_event(&event);
+                if et == "agent_start" || et == "turn_start" {
+                    store.mutate(&app, |s| { set_sess_status(s, &sid, "running"); }).await;
+                } else if et == "agent_end" || et == "turn_end" {
+                    store.mutate(&app, |s| { set_sess_status(s, &sid, "idle"); }).await;
+                }
+                let _ = app.emit("agent-event", FrontendEvent { event_type: et, session_id: sid, data });
+            })
+        })).await;
+        *self.session.lock().await = Some(session);
+        Ok(())
+    }
+
     /// Create an agent session. If `session_file` is provided, it loads
     /// an existing JSONL session file instead of creating a new one.
+    /// Pushes a new session record to workspace[0].
     pub async fn create_agent_session(self: &Arc<Self>, app: &AppHandle, cwd: &str, session_file: Option<String>) -> Result<String, String> {
         pi_ai::providers::register_builtins::register_built_in_api_providers();
 

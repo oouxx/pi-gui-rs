@@ -270,30 +270,24 @@ pub async fn submit_composer(
     _options: Option<serde_json::Value>,
 ) -> Result<DesktopState, String> {
     if store.session.lock().await.is_none() {
-        eprintln!("[LLM] no session, creating one");
-        let state = store.state.lock().await;
-        let sid = state["selectedSessionId"].as_str().unwrap_or("");
-        let ws_id = state["selectedWorkspaceId"]
-            .as_str()
-            .unwrap_or("ws-default");
-        let cwd = cwd_fallback(workspace::workspace_path(&state, ws_id).or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-        }));
-        // Look up sessionFile for an existing (restored) session
-        let session_file: Option<String> = state["workspaces"]
-            .as_array()
-            .and_then(|ws| ws.iter().find(|w| w["id"] == ws_id))
-            .and_then(|w| w["sessions"].as_array())
-            .and_then(|ss| ss.iter().find(|s| s["id"] == sid))
-            .and_then(|s| s["sessionFile"].as_str().filter(|f| !f.is_empty()))
-            .map(String::from);
-        drop(state);
-        store
-            .create_agent_session(&app, &cwd, session_file)
-            .await
-            .map_err(|e| format!("{e}"))?;
+        eprintln!("[LLM] no session, attaching to existing record");
+        let (sid, cwd, session_file) = {
+            let state = store.state.lock().await;
+            let sid = state["selectedSessionId"].as_str().unwrap_or("").to_string();
+            let ws_id = state["selectedWorkspaceId"].as_str().unwrap_or("ws-default");
+            let cwd = cwd_fallback(workspace::workspace_path(&state, ws_id).or_else(||
+                std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string())
+            ));
+            let file = state["workspaces"].as_array()
+                .and_then(|ws| ws.iter().find(|w| w["id"] == ws_id))
+                .and_then(|w| w["sessions"].as_array())
+                .and_then(|ss| ss.iter().find(|s| s["id"] == sid))
+                .and_then(|s| s["sessionFile"].as_str().filter(|f| !f.is_empty()))
+                .map(String::from);
+            (sid, cwd, file)
+        };
+        if sid.is_empty() { return Err("No active session".into()); }
+        store.attach_agent_session(&app, &cwd, &sid, session_file).await?;
     }
     eprintln!("[LLM] sending message...");
     store
@@ -327,7 +321,7 @@ pub async fn start_thread(
     }
     if store.session.lock().await.is_none() {
         let state = store.state.lock().await;
-        let sid = state["selectedSessionId"].as_str().unwrap_or("");
+        let sid = state["selectedSessionId"].as_str().unwrap_or("").to_string();
         let cwd = cwd_fallback(workspace::workspace_path(&state, ws_id).or_else(|| {
             std::env::current_dir()
                 .ok()
@@ -342,7 +336,7 @@ pub async fn start_thread(
             .map(String::from);
         drop(state);
         store
-            .create_agent_session(&app, &cwd, session_file)
+            .attach_agent_session(&app, &cwd, &sid, session_file)
             .await
             .map_err(|e| format!("{e}"))?;
     }
