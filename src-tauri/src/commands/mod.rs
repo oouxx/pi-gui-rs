@@ -1,7 +1,7 @@
 use crate::state::*;
 use crate::state::{
     composer, extensions, git, model, persistence, providers, session, skills,
-    theme, workspace,
+    workspace,
 };
 use pi_agent_core::pi_ai_types::ContentBlock;
 use pi_agent_core::types::AgentMessage;
@@ -36,42 +36,6 @@ pub async fn get_state(store: State<'_, Arc<Store>>) -> Result<DesktopState, Str
     let state = store.state.lock().await.clone();
     Ok(state)
 }
-
-#[tauri::command]
-pub async fn create_agent_session_cmd(
-    app: AppHandle,
-    store: State<'_, Arc<Store>>,
-    cwd: String,
-) -> Result<String, String> {
-    store.create_agent_session(&app, &cwd, None).await
-}
-
-#[tauri::command]
-pub async fn send_message_cmd(
-    app: AppHandle,
-    store: State<'_, Arc<Store>>,
-    text: String,
-) -> Result<(), String> {
-    store.send_message(&app, &text).await
-}
-
-#[tauri::command]
-pub async fn abort_cmd(store: State<'_, Arc<Store>>) -> Result<(), String> {
-    store.abort().await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn is_streaming_cmd(store: State<'_, Arc<Store>>) -> Result<bool, String> {
-    Ok(store.is_streaming.load(Ordering::SeqCst))
-}
-
-#[tauri::command]
-pub async fn get_messages_cmd(store: State<'_, Arc<Store>>) -> Result<Vec<AgentMessage>, String> {
-    Ok(store.get_messages().await)
-}
-
-// ── Workspace ──
 
 #[tauri::command]
 pub async fn add_workspace_path(
@@ -629,13 +593,6 @@ pub async fn refresh_runtime(
 }
 
 #[tauri::command]
-pub async fn get_runtime_info() -> Result<serde_json::Value, String> {
-    Ok(build_runtime_snapshot())
-}
-
-// ── Composer ──
-
-#[tauri::command]
 pub async fn update_composer_draft(
     app: AppHandle,
     store: State<'_, Arc<Store>>,
@@ -736,7 +693,7 @@ pub async fn set_theme_mode(
     mode: String,
 ) -> Result<DesktopState, String> {
     Ok(store
-        .mutate(&app, |s| theme::set_theme_mode(s, &mode))
+        .mutate(&app, |s| { s["themeMode"] = json!(mode); })
         .await)
 }
 
@@ -747,7 +704,7 @@ pub async fn set_theme_preset_id(
     preset_id: String,
 ) -> Result<DesktopState, String> {
     Ok(store
-        .mutate(&app, |s| theme::set_theme_preset(s, &preset_id))
+        .mutate(&app, |s| { s["themePresetId"] = json!(preset_id); })
         .await)
 }
 

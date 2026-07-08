@@ -9,12 +9,6 @@ pub fn run() {
             // Core
             commands::ping,
             commands::get_state,
-            // Agent session
-            commands::create_agent_session_cmd,
-            commands::send_message_cmd,
-            commands::abort_cmd,
-            commands::is_streaming_cmd,
-            commands::get_messages_cmd,
             // Workspace
             commands::add_workspace_path,
             commands::pick_workspace,
@@ -65,7 +59,6 @@ pub fn run() {
             commands::set_extension_enabled,
             commands::respond_to_host_ui_request,
             // Runtime
-            commands::get_runtime_info,
             // Notifications
             commands::set_notification_preferences,
             commands::set_integrated_terminal_shell,
