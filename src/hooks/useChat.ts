@@ -109,10 +109,49 @@ export function useChat() {
     setActiveSessionId(sessionId)
   }, [])
 
+  const createSession = useCallback(async (title?: string) => {
+    const api = window.piApp
+    if (!api) return null as string | null
+    let wsId = activeWsIdRef.current
+    if (!wsId) {
+      const state = await api.getState()
+      const ws = state.workspaces.find((w) => w.id === state.selectedWorkspaceId)
+      if (!ws) {
+        await api.addWorkspacePath("/tmp")
+        const newState = await api.getState()
+        wsId = newState.workspaces[0]?.id ?? ""
+      } else { wsId = ws.id }
+    }
+    if (!wsId) return null
+    const newState = await api.createSession({ workspaceId: wsId, title: title || "New thread" })
+    const newSessionId = newState.selectedSessionId
+    if (newSessionId) setActiveSessionId(newSessionId)
+    return newSessionId
+  }, [])
+
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const api = window.piApp
+    if (!api || !activeWsIdRef.current) return
+    await api.archiveSession({ workspaceId: activeWsIdRef.current, sessionId })
+    if (activeSessionId === sessionId) setActiveSessionId(null)
+    refreshState()
+  }, [activeSessionId, refreshState])
+
+  const archiveSession = useCallback(async (sessionId: string) => {
+    const api = window.piApp
+    if (!api || !activeWsIdRef.current) return
+    await api.archiveSession({ workspaceId: activeWsIdRef.current, sessionId })
+    if (activeSessionId === sessionId) setActiveSessionId(null)
+    refreshState()
+  }, [activeSessionId, refreshState])
+
   return {
     sessions,
     activeSessionId,
     selectSession,
+    createSession,
+    deleteSession,
+    archiveSession,
     messages,
     sendMessage,
     streaming,

@@ -4,13 +4,13 @@ import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup,
   SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { Search, Plus, Settings, Puzzle, Code2, FolderGit2 } from "lucide-react"
+import { Search, Plus, Settings, Puzzle, Code2, FolderGit2, Trash2 } from "lucide-react"
 import { useAppMode } from "@/contexts/AppModeContext"
 import { useChat } from "@/hooks/useChat"
 
 export default function PiSidebar() {
   const { mode, setMode } = useAppMode()
-  const { sessions, activeSessionId, selectSession, loading } = useChat()
+  const { sessions, activeSessionId, selectSession, createSession, deleteSession, loading } = useChat()
   const [search, setSearch] = useState("")
 
   const filtered = search.trim()
@@ -22,7 +22,7 @@ export default function PiSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => setMode("chat")} tooltip="New thread">
+            <SidebarMenuButton onClick={async () => { await createSession(); setMode("chat"); }} tooltip="New thread">
               <Plus />
               <span>New thread</span>
             </SidebarMenuButton>
@@ -88,7 +88,7 @@ export default function PiSidebar() {
               </div>
             ) : (
               filtered.map((s) => (
-                <SidebarMenuItem key={s.id}>
+                <SidebarMenuItem key={s.id} className="group/item">
                   <SidebarMenuButton
                     isActive={activeSessionId === s.id}
                     onClick={() => {
@@ -102,6 +102,16 @@ export default function PiSidebar() {
                     />
                     <span className="flex-1 truncate">{s.title}</span>
                   </SidebarMenuButton>
+                  <button
+                    className="text-muted-foreground hover:text-destructive absolute top-1/2 right-1.5 z-10 -translate-y-1/2 opacity-0 transition-opacity group-hover/item:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteSession(s.id)
+                    }}
+                    title="Delete"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
                 </SidebarMenuItem>
               ))
             )}
