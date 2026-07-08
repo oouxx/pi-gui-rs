@@ -30,6 +30,7 @@ export function useChat() {
   const activeWsIdRef = useRef<string>("");
   const activeSessionIdRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
+  const transcriptGenRef = useRef(0);
 
   // Sync refs (avoid stale closures)
   useEffect(() => {
@@ -90,16 +91,20 @@ export function useChat() {
     const api = window.piApp;
     if (!api || !activeSessionId) return;
 
-    // Sync ref and clear stale messages immediately
+    // Subscribe to transcript events — filter by generation to ignore
+    // events from previously selected sessions.
+    const gen = ++transcriptGenRef.current;
     activeSessionIdRef.current = activeSessionId;
     setMessages([]);
     api.getSelectedTranscript().then((t) => {
-      setMessages(t ? transcriptToDisplay(t.transcript) : []);
+      if (gen === transcriptGenRef.current) {
+        setMessages(t ? transcriptToDisplay(t.transcript) : []);
+      }
     });
 
     const unsub = api.onSelectedTranscriptChanged((t) => {
-      // Ignore transcript updates for non-active sessions
-      if (t && (t.workspaceId !== activeWsIdRef.current || t.sessionId !== activeSessionIdRef.current)) return;
+      // Stale event from a previous session switch — ignore
+      if (gen !== transcriptGenRef.current) return;
 
       setMessages(t ? transcriptToDisplay(t.transcript) : []);
 
@@ -202,11 +207,17 @@ export function useChat() {
   const selectSession = useCallback(async (sessionId: string) => {
     const api = window.piApp;
     if (!api || !activeWsIdRef.current) return;
+    const gen = ++transcriptGenRef.current;
     await api.selectSession({ workspaceId: activeWsIdRef.current, sessionId });
     activeSessionIdRef.current = sessionId;
     setActiveSessionId(sessionId);
-    // Clear messages immediately so old messages don't flash
     setMessages([]);
+    // Fetch transcript for this generation — ignore stale responses
+    api.getSelectedTranscript().then((t) => {
+      if (gen === transcriptGenRef.current) {
+        setMessages(t ? transcriptToDisplay(t.transcript) : []);
+      }
+    });
   }, []);
 
   const createSession = useCallback(async (title?: string) => {

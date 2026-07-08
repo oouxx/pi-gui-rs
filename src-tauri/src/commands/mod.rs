@@ -332,7 +332,6 @@ pub async fn submit_composer(
     text: String,
     _options: Option<serde_json::Value>,
 ) -> Result<DesktopState, String> {
-    eprintln!("[IPC ←] submit_composer: len={}", text.len());
     if store.session.lock().await.is_none() {
         eprintln!("[LLM] no session, creating one");
         let state = store.state.lock().await;
@@ -915,15 +914,6 @@ pub async fn get_selected_transcript(
     if messages.is_empty() {
         return Ok(None);
     }
-    let sid_state = store.state.lock().await["selectedSessionId"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    let sid_sess = store.session_id.lock().await.clone().unwrap_or_default();
-    eprintln!(
-        "[IPC] sess_id check: state={sid_state} session={sid_sess} match={}",
-        sid_state == sid_sess
-    );
     let ws_id = store.state.lock().await["selectedWorkspaceId"]
         .as_str()
         .unwrap_or("ws-default")
@@ -956,26 +946,7 @@ pub async fn get_selected_transcript(
         return Ok(None);
     }
     let result = json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript});
-    let count = result["transcript"].as_array().map_or(0, |a| a.len());
-    let roles: Vec<&str> = result["transcript"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|m| m["role"].as_str()).collect())
-        .unwrap_or_default();
-    eprintln!(
-        "[IPC ←] get_selected_transcript: ws={ws_id} sess={sess_id} count={count} roles={roles:?}"
-    );
     let state2 = store.state.lock().await;
-    let has_sess = state2["workspaces"]
-        .as_array()
-        .and_then(|ws| ws.iter().find(|w| w["id"] == ws_id))
-        .and_then(|w| w["sessions"].as_array())
-        .map(|s| s.iter().any(|s| s["id"] == sess_id))
-        .unwrap_or(false);
-    let sid = state2["selectedSessionId"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    eprintln!("[IPC] frontend check: selectedSessId={sid} sessInWorkspace={has_sess}");
     drop(state2);
     Ok(Some(result))
 }
