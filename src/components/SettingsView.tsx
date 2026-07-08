@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import ModelsSettings from "./ModelsSettings"
 
 const settingsTabs = [
   { id: "general", label: "General", desc: "Appearance, language, theme" },
@@ -53,11 +54,15 @@ export default function SettingsView() {
               {settingsTabs.find((t) => t.id === activeTab)?.desc}
             </p>
 
-            <div className="border-hairline flex items-center justify-center rounded-lg border p-16">
-              <p className="text-muted-foreground text-xs">
-                {activeTab} settings — coming soon
-              </p>
-            </div>
+            {activeTab === "models" ? (
+              <ModelsSettings />
+            ) : (
+              <div className="border-hairline flex items-center justify-center rounded-lg border p-16">
+                <p className="text-muted-foreground text-xs">
+                  {activeTab} settings — coming soon
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
