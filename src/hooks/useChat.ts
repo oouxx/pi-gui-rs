@@ -39,19 +39,16 @@ export function useChat() {
   const refreshState = useCallback(async () => {
     try {
       const state = await getState();
-      const ws = state.workspaces?.[0];
-      if (ws) {
-        setSessions(
-          (ws.sessions ?? [])
-            .filter((s: any) => !s.archivedAt)
-            .map((s: any) => ({
-              id: s.id,
-              title: s.title || "Untitled",
-              updatedAt: s.updatedAt,
-              status: s.status,
-            })),
-        );
-      }
+      setSessions(
+        (state.sessions ?? [])
+          .filter((s: any) => !s.archivedAt)
+          .map((s: any) => ({
+            id: s.id,
+            title: s.title || "Untitled",
+            updatedAt: s.updatedAt,
+            status: s.status,
+          })),
+      );
       if (state.selectedSessionId && state.selectedSessionId !== activeSessionIdRef.current) {
         setActiveSessionId(state.selectedSessionId);
       }
@@ -101,8 +98,7 @@ export function useChat() {
     const interval = setInterval(async () => {
       try {
         const state = await getState();
-        const ws = state.workspaces?.[0];
-        const session = (ws?.sessions ?? []).find((s: any) => s.id === activeSessionId);
+        const session = (state.sessions ?? []).find((s: any) => s.id === activeSessionId);
         if (session?.status === "idle") {
           setStreaming(false);
           streamingRef.current = false;
