@@ -23,6 +23,7 @@ fn write_models_map(map: &Map<String, Value>) {
 }
 
 /// List custom providers from ~/.pi-rs/agent/models.json
+// TODO: delegate to pi-rs once it provides a custom provider CRUD API
 pub fn list_custom_providers() -> Vec<Value> {
     let map = read_models_map();
     map.values()

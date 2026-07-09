@@ -1,107 +1,75 @@
 //! Session operations.
+//!
+//! Session file I/O delegated to pi-rs `SessionManager`.
 
-use std::path::PathBuf;
 use serde_json::json;
+use pi_coding_agent::core::session_manager::SessionManager;
 use crate::state::internal::{DesktopState, SessionRecord, now_iso};
 
 /// Scan `~/.pi-rs/agent/sessions/` for `.jsonl` files and return session records.
+/// Delegates to pi-rs `SessionManager::list_all()`.
 pub fn scan_existing_sessions() -> Vec<SessionRecord> {
-    let dir = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h).join(".pi-rs").join("agent").join("sessions"),
-        Err(_) => return vec![],
+    let sessions = futures::executor::block_on(SessionManager::list_all(None));
+    sessions.into_iter().map(|info| {
+        let title = info.name.unwrap_or_else(|| {
+            let first = &info.first_message;
+            if first.is_empty() || first == "(no messages)" {
+                info.path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Untitled")
+                    .to_string()
+            } else {
+                first.chars().take(60).collect()
+            }
+        });
+        SessionRecord {
+            id: info.id.clone(),
+            title,
+            updated_at: info.modified.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            preview: String::new(),
+            status: "idle".to_string(),
+            has_unseen_update: false,
+            session_file: Some(info.path.to_string_lossy().to_string()),
+            archived_at: None,
+            config: None,
+            thinking_level: None,
+        }
+    }).collect()
+}
+
+/// Read transcript messages from a JSONL session file using pi-rs `SessionManager`.
+pub fn read_transcript_from_file(path: &str) -> Vec<serde_json::Value> {
+    let session_dir = match std::path::PathBuf::from(path).parent() {
+        Some(p) => p.to_string_lossy().to_string(),
+        None => return vec![],
     };
-    if !dir.exists() { return vec![]; }
-
-    let mut sessions: Vec<SessionRecord> = vec![];
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") { continue; }
-            let path_str = path.to_string_lossy().to_string();
-            let id = path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let title = extract_session_title(&path);
-
-            sessions.push(SessionRecord {
-                id,
-                title,
-                updated_at: now_iso(),
-                preview: String::new(),
-                status: "idle".to_string(),
-                has_unseen_update: false,
-                session_file: Some(path_str),
-                archived_at: None,
-                config: None,
-                thinking_level: None,
-            });
+    let mgr = SessionManager::new("", &session_dir, Some(path), false, None);
+    let entries = mgr.get_entries();
+    let mut messages = Vec::new();
+    for entry in &entries {
+        use pi_coding_agent::core::session_manager::SessionEntry;
+        if let SessionEntry::Message { message, .. } = entry {
+            let role = message.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if role != "user" && role != "assistant" { continue; }
+            let text: String = message.get("content").and_then(|c| c.as_array())
+                .map(|arr| arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect())
+                .unwrap_or_default();
+            let ts = message.get("timestamp").and_then(|t| t.as_i64()).unwrap_or(0);
+            let ts_secs = ts as f64 / 1000.0;
+            let created = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
+                .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .unwrap_or_else(now_iso);
+            messages.push(json!({
+                "id": format!("msg-{}", messages.len()),
+                "kind": "message",
+                "role": role,
+                "text": text,
+                "createdAt": created,
+            }));
         }
     }
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    sessions
-}
-
-/// Read transcript messages directly from a JSONL session file (append-only).
-pub fn read_transcript_from_file(path: &str) -> Vec<serde_json::Value> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    let mut messages = Vec::new();
-    for line in content.lines() {
-        let val: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if val.get("type").and_then(|t| t.as_str()) == Some("session") { continue; }
-        let msg = match val.get("message") {
-            Some(m) => m,
-            None => continue,
-        };
-        let role = match msg.get("role").and_then(|r| r.as_str()) {
-            Some("user") => "user",
-            Some("assistant") => "assistant",
-            _ => continue,
-        };
-        let text: String = msg.get("content").and_then(|c| c.as_array())
-            .map(|arr| arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect())
-            .unwrap_or_default();
-        let ts = val.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
-        messages.push(json!({
-            "id": format!("msg-{}", messages.len()),
-            "kind": "message",
-            "role": role,
-            "text": text,
-            "createdAt": ts,
-        }));
-    }
     messages
-}
-
-/// Extract a title from the first user message in a JSONL session file.
-fn extract_session_title(path: &PathBuf) -> String {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string(),
-    };
-    for line in content.lines() {
-        let val: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if val.get("type").and_then(|t| t.as_str()) != Some("message") { continue; }
-        let msg = match val.get("message") {
-            Some(m) => m,
-            None => continue,
-        };
-        if msg.get("role").and_then(|r| r.as_str()) != Some("user") { continue; }
-        let text: String = msg.get("content").and_then(|c| c.as_array())
-            .map(|arr| arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect())
-            .unwrap_or_default();
-        if !text.is_empty() { return text.chars().take(60).collect(); }
-    }
-    path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string()
 }
 
 /// Select a session by ID.

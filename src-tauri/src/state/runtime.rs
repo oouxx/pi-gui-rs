@@ -13,30 +13,9 @@ fn load_default_settings() -> pi_coding_agent::core::settings_manager::Settings 
     mgr.get_global_settings().clone()
 }
 
-/// List of (provider_id, env_var_name) pairs used to determine `hasAuth`.
-fn provider_env_keys() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("anthropic", "ANTHROPIC_API_KEY"),
-        ("openai", "OPENAI_API_KEY"),
-        ("google", "GOOGLE_API_KEY"),
-        ("deepseek", "DEEPSEEK_API_KEY"),
-        ("openrouter", "OPENROUTER_API_KEY"),
-        ("mistral", "MISTRAL_API_KEY"),
-        ("groq", "GROQ_API_KEY"),
-        ("xai", "XAI_API_KEY"),
-        ("cerebras", "CEREBRAS_API_KEY"),
-        ("together", "TOGETHER_API_KEY"),
-        ("fireworks", "FIREWORKS_API_KEY"),
-        ("github-copilot", "COPILOT_API_KEY"),
-        ("huggingface", "HF_API_KEY"),
-        ("minimax", "MINIMAX_API_KEY"),
-        ("moonshotai", "MOONSHOT_API_KEY"),
-        ("kimi-coding", "KIMI_CODING_API_KEY"),
-    ]
-}
-
 /// Reads pi-ai model registry + settings + env vars to build the
 /// runtime snapshot the frontend needs for model lists.
+/// Provider auth status delegated to pi-rs `pi_ai::env_api_keys`.
 pub fn build_runtime_snapshot() -> RuntimeSnapshot {
     pi_ai::providers::register_builtins::register_built_in_api_providers();
     use pi_coding_agent::core::model_registry::ModelRegistry;
@@ -50,9 +29,8 @@ pub fn build_runtime_snapshot() -> RuntimeSnapshot {
     let mut provider_list = Vec::new();
 
     for pid in &providers {
-        let has_auth = provider_env_keys().iter()
-            .find(|(p, _)| *p == pid.as_str())
-            .and_then(|(_, k)| std::env::var(k).ok())
+        let has_auth = pi_ai::env_api_keys::get_env_var_name(pid)
+            .and_then(|var| std::env::var(var).ok())
             .map(|v| !v.is_empty() && v != "placeholder")
             .unwrap_or(false);
 
