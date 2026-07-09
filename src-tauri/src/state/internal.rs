@@ -496,8 +496,13 @@ impl Store {
             if !abort.load(Ordering::SeqCst) {
                 eprintln!("[LLM] <<< {}", &t);
                 // add_user_text persists the user message AND runs the agent loop.
-                // After it returns, the full transcript (user + assistant) is available.
-                session.add_user_text(&t).await;
+                // Wrap with a 5-minute timeout to prevent hanging when the LLM
+                // API has no timeout configured or no API key is set.
+                let agent_fut = session.add_user_text(&t);
+                if tokio::time::timeout(std::time::Duration::from_secs(300), agent_fut).await.is_err() {
+                    eprintln!("[LLM] add_user_text timed out after 300s, aborting");
+                    session.abort().await;
+                }
             }
             eprintln!("[LLM] add_user_text done");
             // Put session back regardless of outcome
