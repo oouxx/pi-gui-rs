@@ -1,5 +1,4 @@
-//! Internal helpers, types, and the Store struct — matches original
-//! `app-store-internals.ts` and part of `app-store.ts`.
+//! Internal helpers, types, and the Store struct.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -27,49 +26,31 @@ pub fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-pub fn next_id(prefix: &str) -> String {
-    format!("{}-{}", prefix, chrono::Utc::now().timestamp_millis())
-}
-
 pub fn set_sess_status(s: &mut DesktopState, sid: &str, status: &str) {
-    let ws_list = match s["workspaces"].as_array_mut() {
+    let sessions = match s["sessions"].as_array_mut() {
         Some(a) => a,
         None => return,
     };
-    for ws in ws_list.iter_mut() {
-        let sessions = match ws["sessions"].as_array_mut() {
-            Some(a) => a,
-            None => continue,
-        };
-        for sess in sessions.iter_mut() {
-            if sess["id"] == sid {
-                sess["status"] = json!(status);
-                return;
-            }
+    for sess in sessions.iter_mut() {
+        if sess["id"] == sid {
+            sess["status"] = json!(status);
+            return;
         }
     }
 }
 
 pub fn set_sess_field(
     s: &mut DesktopState,
-    target: &serde_json::Value,
+    sess_id: &str,
     field: &str,
     value: serde_json::Value,
 ) {
-    let ws_id = target["workspaceId"].as_str().unwrap_or("");
-    let sess_id = target["sessionId"].as_str().unwrap_or("");
-    let ws_list = match s["workspaces"].as_array_mut() {
+    let sessions = match s["sessions"].as_array_mut() {
         Some(a) => a,
         None => return,
     };
-    if let Some(ws) = ws_list.iter_mut().find(|w| w["id"] == ws_id) {
-        let sessions = match ws["sessions"].as_array_mut() {
-            Some(a) => a,
-            None => return,
-        };
-        if let Some(sess) = sessions.iter_mut().find(|s| s["id"] == sess_id) {
-            sess[field] = value;
-        }
+    if let Some(sess) = sessions.iter_mut().find(|s| s["id"] == sess_id) {
+        sess[field] = value;
     }
 }
 
@@ -78,47 +59,25 @@ pub fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
         AgentEvent::AgentStart => ("agent_start".into(), json!({})),
         AgentEvent::AgentEnd { messages } => ("agent_end".into(), json!({"messages": messages})),
         AgentEvent::TurnStart => ("turn_start".into(), json!({})),
-        AgentEvent::TurnEnd {
-            message,
-            tool_results,
-        } => (
+        AgentEvent::TurnEnd { message, tool_results } => (
             "turn_end".into(),
             json!({"message": message, "tool_results": tool_results}),
         ),
-        AgentEvent::MessageStart { message } => {
-            ("message_start".into(), json!({"message": message}))
-        }
-        AgentEvent::MessageUpdate {
-            assistant_message_event,
-            ..
-        } => (
+        AgentEvent::MessageStart { message } => ("message_start".into(), json!({"message": message})),
+        AgentEvent::MessageUpdate { assistant_message_event, .. } => (
             "message_update".into(),
             serde_json::to_value(assistant_message_event).unwrap_or_default(),
         ),
         AgentEvent::MessageEnd { message } => ("message_end".into(), json!({"message": message})),
-        AgentEvent::ToolExecutionStart {
-            tool_call_id,
-            tool_name,
-            args,
-        } => (
+        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => (
             "tool_execution_start".into(),
             json!({"tool_call_id": tool_call_id, "tool_name": tool_name, "args": args}),
         ),
-        AgentEvent::ToolExecutionUpdate {
-            tool_call_id,
-            tool_name,
-            args,
-            partial_result,
-        } => (
+        AgentEvent::ToolExecutionUpdate { tool_call_id, tool_name, args, partial_result } => (
             "tool_execution_update".into(),
             json!({"tool_call_id": tool_call_id, "tool_name": tool_name, "args": args, "partial_result": partial_result}),
         ),
-        AgentEvent::ToolExecutionEnd {
-            tool_call_id,
-            tool_name,
-            result,
-            is_error,
-        } => (
+        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => (
             "tool_execution_end".into(),
             json!({"tool_call_id": tool_call_id, "tool_name": tool_name, "result": result, "is_error": is_error}),
         ),
@@ -127,17 +86,10 @@ pub fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
 
 // ── Default state ──────────────────────────────────────────
 
-/// The default UI state skeleton — used by `Store::new()` and by
-/// `persistence::restore_state()` as a merge base so that the app
-/// never sees a structurally incomplete state.
 pub fn default_state() -> DesktopState {
     json!({
         "revision": 1,
-        "workspaces": [{
-            "id": "ws-default", "name": "default", "path": "",
-            "lastOpenedAt": now_iso(), "kind": "primary", "sessions": []
-        }],
-        "selectedWorkspaceId": "ws-default",
+        "sessions": [],
         "selectedSessionId": "",
         "runtimeByWorkspace": {},
         "globalModelSettings": {"enabledModelPatterns": []},
@@ -166,27 +118,19 @@ impl Store {
     }
 
     pub fn new_with_runtime() -> Arc<Self> {
-        // Restore active IDs, scan JSONL files for existing sessions.
         let restored = persistence::restore_state();
         let store = Self::new();
         {
             let mut state = store.state.blocking_lock();
             let mut s = default_state();
-            if let Some(ws_id) = restored["selectedWorkspaceId"]
-                .as_str()
-                .filter(|x| !x.is_empty())
-            {
-                s["selectedWorkspaceId"] = json!(ws_id);
-            }
             if let Some(sess_id) = restored["selectedSessionId"]
                 .as_str()
                 .filter(|x| !x.is_empty())
             {
                 s["selectedSessionId"] = json!(sess_id);
             }
-            // Scan for existing session files on disk
             let scanned = super::session::scan_existing_sessions();
-            s["workspaces"][0]["sessions"] = json!(scanned);
+            s["sessions"] = json!(scanned);
             s["runtimeByWorkspace"]["ws-default"] = super::runtime::build_runtime_snapshot();
             let rev = s["revision"].as_u64().unwrap_or(0) + 1;
             s["revision"] = json!(rev);
@@ -211,8 +155,6 @@ impl Store {
     }
 
     /// Create an AgentSession for an EXISTING session record (no duplicate push).
-    /// Used by submit_composer after the frontend has already called createSession.
-    /// If `session_file` is provided, loads existing JSONL; otherwise creates fresh.
     async fn init_session(
         self: &Arc<Self>,
         app: &AppHandle,
@@ -224,20 +166,13 @@ impl Store {
 
         let (provider, model_id, thinking_level) = {
             let state = self.state.lock().await;
-            let ws_id = state["selectedWorkspaceId"]
-                .as_str()
-                .unwrap_or("ws-default")
-                .to_string();
             (
-                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"]
-                    .as_str()
-                    .map(|s| s.to_string()),
-                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"]
-                    .as_str()
-                    .map(|s| s.to_string()),
-                state["runtimeByWorkspace"][&ws_id]["settings"]["defaultThinkingLevel"]
-                    .as_str()
-                    .map(|s| s.to_string()),
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultProvider"]
+                    .as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultModelId"]
+                    .as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultThinkingLevel"]
+                    .as_str().map(|s| s.to_string()),
             )
         };
 
@@ -281,17 +216,8 @@ impl Store {
             .map(|p| p.to_string_lossy().to_string());
         let sid = current_sid.to_string();
         *self.session_id.lock().await = Some(sid.clone());
-        // Update the existing session record with sessionFile path
         self.mutate(app, |s| {
-            let ws_id = s["selectedWorkspaceId"]
-                .as_str()
-                .unwrap_or("ws-default")
-                .to_string();
-            if let Some(sessions) = s["workspaces"]
-                .as_array_mut()
-                .and_then(|ws| ws.iter_mut().find(|w| w["id"] == ws_id))
-                .and_then(|w| w["sessions"].as_array_mut())
-            {
+            if let Some(sessions) = s["sessions"].as_array_mut() {
                 if let Some(sess) = sessions.iter_mut().find(|s| s["id"] == sid) {
                     if let Some(fp) = &sess_file_path {
                         sess["sessionFile"] = json!(fp);
@@ -299,8 +225,7 @@ impl Store {
                 }
             }
             s["selectedSessionId"] = json!(&sid);
-        })
-        .await;
+        }).await;
 
         let store = self.clone();
         let a = app.clone();
@@ -313,26 +238,11 @@ impl Store {
                 Box::pin(async move {
                     let (et, data) = serialize_event(&event);
                     if et == "agent_start" || et == "turn_start" {
-                        store
-                            .mutate(&app, |s| {
-                                set_sess_status(s, &sid, "running");
-                            })
-                            .await;
+                        store.mutate(&app, |s| { set_sess_status(s, &sid, "running"); }).await;
                     } else if et == "agent_end" || et == "turn_end" {
-                        store
-                            .mutate(&app, |s| {
-                                set_sess_status(s, &sid, "idle");
-                            })
-                            .await;
+                        store.mutate(&app, |s| { set_sess_status(s, &sid, "idle"); }).await;
                     }
-                    let _ = app.emit(
-                        "agent-event",
-                        FrontendEvent {
-                            event_type: et,
-                            session_id: sid,
-                            data,
-                        },
-                    );
+                    let _ = app.emit("agent-event", FrontendEvent { event_type: et, session_id: sid, data });
                 })
             }))
             .await;
@@ -340,9 +250,7 @@ impl Store {
         Ok(())
     }
 
-    /// Create an agent session. If `session_file` is provided, it loads
-    /// an existing JSONL session file instead of creating a new one.
-    /// Pushes a new session record to workspace[0].
+    /// Create an agent session. Pushes a new session record.
     pub async fn create_agent_session(
         self: &Arc<Self>,
         app: &AppHandle,
@@ -351,22 +259,17 @@ impl Store {
     ) -> Result<String, String> {
         pi_ai::providers::register_builtins::register_built_in_api_providers();
 
-        let state = self.state.lock().await;
-        let ws_id = state["selectedWorkspaceId"]
-            .as_str()
-            .unwrap_or("ws-default")
-            .to_string();
-        let provider = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultProvider"]
-            .as_str()
-            .map(|s| s.to_string());
-        let model_id = state["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"]
-            .as_str()
-            .map(|s| s.to_string());
-        let thinking_level = state["runtimeByWorkspace"][&ws_id]["settings"]
-            ["defaultThinkingLevel"]
-            .as_str()
-            .map(|s| s.to_string());
-        drop(state);
+        let (provider, model_id, thinking_level) = {
+            let state = self.state.lock().await;
+            (
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultProvider"]
+                    .as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultModelId"]
+                    .as_str().map(|s| s.to_string()),
+                state["runtimeByWorkspace"]["ws-default"]["settings"]["defaultThinkingLevel"]
+                    .as_str().map(|s| s.to_string()),
+            )
+        };
 
         eprintln!("[LLM] create session: provider={provider:?} model={model_id:?} session_file={session_file:?}");
 
@@ -405,21 +308,11 @@ impl Store {
         let (mut session, result) = create_agent_session(opts())
             .await
             .map_err(|e| format!("{e}"))?;
-        eprintln!(
-            "[LLM] session created: model_fallback={:?}",
-            result.model_fallback_message
-        );
-        eprintln!(
-            "[LLM] session cwd={} id={} name={:?}",
-            session.get_cwd(),
-            session.get_session_id(),
-            session.get_session_name()
-        );
-        eprintln!(
-            "[LLM] session scoped_models count={}",
-            session.get_scoped_models().len()
-        );
-        // Capture the session file path for persistence restore
+        eprintln!("[LLM] session created: model_fallback={:?}", result.model_fallback_message);
+        eprintln!("[LLM] session cwd={} id={} name={:?}",
+            session.get_cwd(), session.get_session_id(), session.get_session_name());
+        eprintln!("[LLM] session scoped_models count={}", session.get_scoped_models().len());
+
         let sess_file_path = session
             .get_session_manager()
             .get_session_file()
@@ -433,13 +326,12 @@ impl Store {
                 "preview": "", "status": "idle", "hasUnseenUpdate": false,
                 "sessionFile": sess_file_path,
             });
-            s["workspaces"][0]["sessions"]
-                .as_array_mut()
-                .unwrap()
-                .push(sess);
+            if let Some(arr) = s["sessions"].as_array_mut() {
+                arr.push(sess);
+            }
             s["selectedSessionId"] = json!(&sid);
-        })
-        .await;
+        }).await;
+
         let store = self.clone();
         let a = app.clone();
         let sid2 = sid.clone();
@@ -451,26 +343,11 @@ impl Store {
                 Box::pin(async move {
                     let (et, data) = serialize_event(&event);
                     if et == "agent_start" || et == "turn_start" {
-                        store
-                            .mutate(&app, |s| {
-                                set_sess_status(s, &sid, "running");
-                            })
-                            .await;
+                        store.mutate(&app, |s| { set_sess_status(s, &sid, "running"); }).await;
                     } else if et == "agent_end" || et == "turn_end" {
-                        store
-                            .mutate(&app, |s| {
-                                set_sess_status(s, &sid, "idle");
-                            })
-                            .await;
+                        store.mutate(&app, |s| { set_sess_status(s, &sid, "idle"); }).await;
                     }
-                    let _ = app.emit(
-                        "agent-event",
-                        FrontendEvent {
-                            event_type: et,
-                            session_id: sid,
-                            data,
-                        },
-                    );
+                    let _ = app.emit("agent-event", FrontendEvent { event_type: et, session_id: sid, data });
                 })
             }))
             .await;
@@ -486,29 +363,18 @@ impl Store {
         let a = app.clone();
         let t = text.to_string();
         let sid2 = sid.clone();
-        let _ = app.emit(
-            "agent-event",
-            FrontendEvent {
-                event_type: "user_message".into(),
-                session_id: sid,
-                data: json!({"text": text, "timestamp": chrono::Utc::now().timestamp_millis()}),
-            },
-        );
+        let _ = app.emit("agent-event", FrontendEvent {
+            event_type: "user_message".into(),
+            session_id: sid,
+            data: json!({"text": text, "timestamp": chrono::Utc::now().timestamp_millis()}),
+        });
 
-        // ── log provider/model ──────────────────────────────────────
         let state_snapshot = self.state.lock().await.clone();
-        let ws_id = state_snapshot["selectedWorkspaceId"]
-            .as_str()
-            .unwrap_or("?")
-            .to_string();
-        let diag_provider = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]
-            ["defaultProvider"]
-            .as_str()
-            .map(|s| s.to_string());
-        let diag_model = state_snapshot["runtimeByWorkspace"][&ws_id]["settings"]["defaultModelId"]
-            .as_str()
-            .map(|s| s.to_string());
-        eprintln!("[LLM] send: ws={ws_id} provider={diag_provider:?} model={diag_model:?}");
+        let diag_provider = state_snapshot["runtimeByWorkspace"]["ws-default"]["settings"]["defaultProvider"]
+            .as_str().map(|s| s.to_string());
+        let diag_model = state_snapshot["runtimeByWorkspace"]["ws-default"]["settings"]["defaultModelId"]
+            .as_str().map(|s| s.to_string());
+        eprintln!("[LLM] send: provider={diag_provider:?} model={diag_model:?}");
         drop(state_snapshot);
 
         tokio::spawn(async move {
@@ -517,54 +383,28 @@ impl Store {
             eprintln!("[LLM] add_user_text done");
             let msgs = session.get_messages().await;
             for msg in &msgs {
-                if let pi_agent_core::types::AgentMessage::Assistant {
-                    content,
-                    error_message,
-                    api,
-                    provider,
-                    model,
-                    ..
-                } = msg
-                {
+                if let pi_agent_core::types::AgentMessage::Assistant { content, error_message, api, provider, model, .. } = msg {
                     if let Some(e) = error_message {
                         eprintln!("[LLM] error: {e}");
                         let err_debug = format!("{:#?}", e);
-                        if err_debug != e.to_string() {
-                            eprintln!("[LLM] error debug: {err_debug}");
-                        }
+                        if err_debug != e.to_string() { eprintln!("[LLM] error debug: {err_debug}"); }
                     }
                     eprintln!("[LLM] assistant msg: api={api} provider={provider} model={model}");
-                    let text: String = content
-                        .iter()
-                        .filter_map(|b| {
-                            if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b {
-                                Some(text.clone())
-                            } else {
-                                None
-                            }
-                        })
+                    let text: String = content.iter()
+                        .filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None })
                         .collect();
-                    if !text.is_empty() {
-                        eprintln!("[LLM] >>> {text}");
-                    }
+                    if !text.is_empty() { eprintln!("[LLM] >>> {text}"); }
                 }
             }
             *s.session.lock().await = Some(session);
             s.is_streaming.store(false, Ordering::SeqCst);
-            let _ = a.emit(
-                "agent-event",
-                FrontendEvent {
-                    event_type: "turn_end".into(),
-                    session_id: sid2.clone(),
-                    data: json!({"message": null, "tool_results": []}),
-                },
-            );
-            // Push the updated transcript directly — no IPC roundtrip needed
+            let _ = a.emit("agent-event", FrontendEvent {
+                event_type: "turn_end".into(),
+                session_id: sid2.clone(),
+                data: json!({"message": null, "tool_results": []}),
+            });
             let msgs2 = s.get_messages().await;
             let state = s.state.lock().await;
-            let ws_id = state["selectedWorkspaceId"]
-                .as_str()
-                .unwrap_or("ws-default");
             let sess_id = state["selectedSessionId"].as_str().unwrap_or("");
             let transcript: Vec<serde_json::Value> = msgs2.iter().filter_map(|msg| {
                 let (role, content, ts) = match msg {
@@ -582,8 +422,7 @@ impl Store {
                 Some(json!({"id": format!("msg-{}", ts), "kind": "message", "role": role, "text": text, "createdAt": created}))
             }).collect();
             if !transcript.is_empty() {
-                let payload =
-                    json!({"workspaceId": ws_id, "sessionId": sess_id, "transcript": transcript});
+                let payload = json!({"sessionId": sess_id, "transcript": transcript});
                 let _ = a.emit("pi-gui:selected-transcript-changed", &payload);
             }
             drop(state);
@@ -600,22 +439,16 @@ impl Store {
         let (sid, cwd, session_file) = {
             let state = self.state.lock().await;
             let sid = state["selectedSessionId"].as_str().unwrap_or("").to_string();
-            let ws_id = state["selectedWorkspaceId"].as_str().unwrap_or("ws-default");
-            let cwd = super::workspace::workspace_path(&state, ws_id)
-                .or_else(|| {
-                    std::env::current_dir()
-                        .ok()
-                        .map(|p| p.to_string_lossy().to_string())
-                })
+            let cwd = std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| {
                     std::env::var("HOME")
                         .map(|h| format!("{}/.pi-rs", h))
                         .unwrap_or_else(|_| "/tmp".into())
                 });
-            let file = state["workspaces"]
+            let file = state["sessions"]
                 .as_array()
-                .and_then(|ws| ws.iter().find(|w| w["id"] == ws_id))
-                .and_then(|w| w["sessions"].as_array())
                 .and_then(|ss| ss.iter().find(|s| s["id"] == sid))
                 .and_then(|s| s["sessionFile"].as_str().filter(|f| !f.is_empty()))
                 .map(String::from);
