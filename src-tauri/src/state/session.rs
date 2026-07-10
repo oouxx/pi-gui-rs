@@ -124,11 +124,20 @@ pub fn select_session_by_id(state: &mut DesktopState, session_id: &str) {
 
 /// Archive a session by ID. After archiving, selects the next available session.
 pub fn archive_session_by_id(state: &mut DesktopState, session_id: &str) {
-    if let Some(sess) = state.sessions.iter_mut().find(|s| s.id == session_id) {
-        sess.archived_at = Some(now_iso());
+    // Delete the session file from disk so it doesn't reappear on restart.
+    if let Some(sess) = state.sessions.iter().find(|s| s.id == session_id) {
+        if let Some(ref fp) = sess.session_file {
+            let path = std::path::Path::new(fp);
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
+    // Remove the session from the in-memory list.
+    state.sessions.retain(|s| s.id != session_id);
+    // Select the next available session.
     let next_id = state.sessions.iter()
-        .find(|s| s.id != session_id && s.archived_at.is_none())
+        .find(|s| s.archived_at.is_none())
         .map(|s| s.id.clone());
     state.selected_session_id = next_id.unwrap_or_default();
 }
