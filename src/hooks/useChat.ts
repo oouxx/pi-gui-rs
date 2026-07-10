@@ -4,6 +4,7 @@ import {
   selectSession as apiSelectSession,
   createSession as apiCreateSession,
   archiveSession as apiArchiveSession,
+  deleteSession as apiDeleteSession,
   renameSession as apiRenameSession,
 } from "../api/commands";
 import { tauriListen } from "../api/events";
@@ -182,6 +183,11 @@ export function useChat() {
   }, [refreshState]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
+    await apiDeleteSession(sessionId);
+    refreshState();
+  }, [refreshState]);
+
+  const archiveSession = useCallback(async (sessionId: string) => {
     await apiArchiveSession(sessionId);
     refreshState();
   }, [refreshState]);
@@ -227,6 +233,7 @@ export function useChat() {
     selectSession,
     createSession,
     deleteSession,
+    archiveSession,
     messages,
     sendMessage,
     streaming,

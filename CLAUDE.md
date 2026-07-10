@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Dev Commands
 
 ```bash
-npm run dev              # Vite dev server (frontend only)
-npm run build            # Vite production build
-npm run tauri:dev        # Tauri dev mode (full desktop app, requires Rust toolchain)
-npm run tauri:build      # Production Tauri build
-npx shadcn@latest add <component>  # Add a shadcn/ui component
+bun run dev              # Vite dev server (frontend only)
+bun run build            # Vite production build
+bun run tauri:dev        # Tauri dev mode (full desktop app, requires Rust toolchain)
+bun run tauri:build      # Production Tauri build
+bunx shadcn@latest add <component>  # Add a shadcn/ui component
 ```
 
 - Rust tests: `cd src-tauri && cargo test` (single test in `state.rs`)
@@ -18,7 +18,6 @@ npx shadcn@latest add <component>  # Add a shadcn/ui component
 ## Architecture
 
 **Tauri v2 app** — Rust backend (`src-tauri/`) + React 19 frontend (`src/`) connected via Tauri IPC.
-
 
 ### State Flow
 

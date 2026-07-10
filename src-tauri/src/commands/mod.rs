@@ -47,6 +47,15 @@ pub async fn archive_session(
 }
 
 #[tauri::command]
+pub async fn delete_session(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    session_id: String,
+) -> Result<DesktopState, String> {
+    Ok(store.mutate(&app, |s| session::delete_session_by_id(s, &session_id)).await)
+}
+
+#[tauri::command]
 pub async fn rename_session(
     app: AppHandle,
     store: State<'_, Arc<Store>>,

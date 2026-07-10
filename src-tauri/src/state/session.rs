@@ -122,14 +122,53 @@ pub fn select_session_by_id(state: &mut DesktopState, session_id: &str) {
     state.selected_session_id = session_id.to_string();
 }
 
-/// Archive a session by ID. After archiving, selects the next available session.
+/// Soft-archive a session by ID: moves the file to an `archived/` subdirectory
+/// and removes the session from the active list. The file remains on disk for
+/// potential recovery. After archiving, selects the next available session.
 pub fn archive_session_by_id(state: &mut DesktopState, session_id: &str) {
-    // Delete the session file from disk so it doesn't reappear on restart.
+    // Move the session file to an archived/ subdirectory.
+    if let Some(sess) = state.sessions.iter().find(|s| s.id == session_id) {
+        if let Some(ref fp) = sess.session_file {
+            let path = std::path::Path::new(fp);
+            if path.exists() {
+                let archived_dir = path.parent().unwrap_or(path).join("archived");
+                let _ = std::fs::create_dir_all(&archived_dir);
+                let dest = archived_dir.join(path.file_name().unwrap_or_default());
+                let _ = std::fs::rename(path, &dest);
+            }
+        }
+    }
+    // Remove the session from the in-memory list.
+    state.sessions.retain(|s| s.id != session_id);
+    // Select the next available session.
+    let next_id = state.sessions.iter()
+        .find(|s| s.archived_at.is_none())
+        .map(|s| s.id.clone());
+    state.selected_session_id = next_id.unwrap_or_default();
+}
+
+/// Permanently delete a session by ID: removes the file from disk and the
+/// session from the in-memory list. After deletion, selects the next available
+/// session.
+pub fn delete_session_by_id(state: &mut DesktopState, session_id: &str) {
+    // Delete the session file from disk.
     if let Some(sess) = state.sessions.iter().find(|s| s.id == session_id) {
         if let Some(ref fp) = sess.session_file {
             let path = std::path::Path::new(fp);
             if path.exists() {
                 let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    // Also remove from archived/ subdirectory if it was moved there.
+    if let Some(sess) = state.sessions.iter().find(|s| s.id == session_id) {
+        if let Some(ref fp) = sess.session_file {
+            let path = std::path::Path::new(fp);
+            if let Some(parent) = path.parent() {
+                let archived_path = parent.join("archived").join(path.file_name().unwrap_or_default());
+                if archived_path.exists() {
+                    let _ = std::fs::remove_file(&archived_path);
+                }
             }
         }
     }
