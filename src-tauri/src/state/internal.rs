@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use pi_agent_core::pi_ai_types::ContentBlock;
 use pi_agent_core::types::{AgentEvent, AgentMessage};
 use pi_coding_agent::core::agent_session::AgentSession;
 use pi_coding_agent::core::sdk::{create_agent_session, CreateAgentSessionOptions};
@@ -74,6 +75,8 @@ pub struct SessionRecord {
     pub config: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +122,51 @@ pub struct FrontendEvent {
     pub event_type: String,
     pub session_id: String,
     pub data: serde_json::Value,
+}
+
+/// Resolve the working directory for a session: prefer the session's stored
+/// cwd (when non-empty), else fall back to the process current directory,
+/// then `$HOME/.pi-rs`, then `/tmp`. Matches the previous `ensure_session`
+/// fallback chain.
+pub fn resolve_session_cwd(session_cwd: Option<&str>) -> String {
+    if let Some(c) = session_cwd.filter(|s| !s.is_empty()) {
+        return c.to_string();
+    }
+    std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            std::env::var("HOME")
+                .map(|h| format!("{}/.pi-rs", h))
+                .unwrap_or_else(|_| "/tmp".into())
+        })
+}
+
+/// Decision for `set_session_cwd`: what to do when the user picks a new folder.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CwdAction {
+    /// Same as current cwd — do nothing.
+    NoOp,
+    /// Session has no agent session yet — set cwd in place on the record.
+    SetInPlace,
+    /// Session already has history — fork a new session (new cwd, copied history).
+    Fork,
+}
+
+/// Decide the cwd action based on whether the session is already initialized
+/// (has a session_file) and whether the new path differs from the current cwd.
+pub fn decide_cwd_action(
+    session_file: Option<&str>,
+    new_path: &str,
+    current_cwd: Option<&str>,
+) -> CwdAction {
+    if current_cwd.map(|c| c == new_path).unwrap_or(false) {
+        return CwdAction::NoOp;
+    }
+    match session_file {
+        None => CwdAction::SetInPlace,
+        Some(_) => CwdAction::Fork,
+    }
 }
 
 pub fn now_iso() -> String {
@@ -175,6 +223,87 @@ pub fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
             json!({"tool_call_id": tool_call_id, "tool_name": tool_name, "result": result, "is_error": is_error}),
         ),
     }
+}
+
+/// Build a display transcript from agent messages, preserving structured
+/// content blocks (text/thinking/toolCall) instead of flattening to plain
+/// text. Tool results are merged onto their corresponding toolCall blocks so
+/// the frontend can render `ToolCallCard` with `status`/`result`/`isError`
+/// both after a turn completes and on session reload.
+pub fn build_display_transcript(msgs: &[AgentMessage]) -> Vec<serde_json::Value> {
+    // First pass: collect tool results keyed by tool_call_id.
+    let mut tool_results: std::collections::HashMap<String, (String, bool)> =
+        std::collections::HashMap::new();
+    for msg in msgs {
+        if let AgentMessage::ToolResult { tool_call_id, content, is_error, .. } = msg {
+            let text: String = content
+                .iter()
+                .filter_map(|b| {
+                    if let ContentBlock::Text { text, .. } = b {
+                        Some(text.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            tool_results.insert(tool_call_id.clone(), (text, *is_error));
+        }
+    }
+
+    // Second pass: emit user/assistant messages with structured content blocks.
+    let mut out = Vec::new();
+    for msg in msgs {
+        let (role, content, ts) = match msg {
+            AgentMessage::User { content, timestamp } => ("user", content, *timestamp),
+            AgentMessage::Assistant { content, timestamp, .. } => ("assistant", content, *timestamp),
+            _ => continue,
+        };
+
+        // Serialize full content blocks, then inject tool execution state
+        // onto toolCall blocks from the matching toolResult message.
+        let mut blocks_val = serde_json::to_value(content).unwrap_or(json!([]));
+        if let Some(arr) = blocks_val.as_array_mut() {
+            for b in arr.iter_mut() {
+                if b.get("type").and_then(|t| t.as_str()) == Some("toolCall") {
+                    if let Some(id) = b.get("id").and_then(|i| i.as_str()) {
+                        if let Some((result, is_error)) = tool_results.get(id) {
+                            b["status"] = json!(if *is_error { "error" } else { "success" });
+                            b["result"] = json!(result);
+                            b["isError"] = json!(is_error);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Flattened text is kept for backward compatibility; the frontend
+        // prefers the structured `content` array when present.
+        let text: String = content
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::Text { text, .. } = b {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let ts_secs = ts as f64 / 1000.0;
+        let created = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
+            .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .unwrap_or_else(now_iso);
+
+        out.push(json!({
+            "id": format!("msg-{}", ts),
+            "kind": "message",
+            "role": role,
+            "text": text,
+            "content": blocks_val,
+            "createdAt": created,
+        }));
+    }
+    out
 }
 
 // ── Default state ──────────────────────────────────────────
@@ -279,7 +408,21 @@ impl Store {
         cwd: &str,
         current_sid: &str,
         session_file: Option<String>,
+        fork_from: Option<String>,
     ) -> Result<(), String> {
+        eprintln!(
+            "[CWD] init_session sid={} cwd={:?} exists={} session_file={:?} fork_from={:?}",
+            current_sid,
+            cwd,
+            std::path::Path::new(cwd).exists(),
+            session_file,
+            fork_from
+        );
+        if cwd.is_empty() {
+            eprintln!("[CWD] WARNING cwd is empty — bash tool will fail");
+        } else if !std::path::Path::new(cwd).exists() {
+            eprintln!("[CWD] WARNING cwd does not exist — bash tool will fail");
+        }
         pi_ai::providers::register_builtins::register_built_in_api_providers();
 
         let (provider, model_id, thinking_level) = {
@@ -318,7 +461,7 @@ impl Store {
             cli_model: None,
             persist_session: true,
             session_file: session_file.clone(),
-            fork_from: None,
+            fork_from: fork_from.clone(),
             session_dir: None,
         };
         let (mut session, _result) = create_agent_session(opts)
@@ -354,6 +497,34 @@ impl Store {
                         store.mutate(&app, |s| { set_sess_status(s, &sid, "running"); }).await;
                     } else if et == "agent_end" || et == "turn_end" {
                         store.mutate(&app, |s| { set_sess_status(s, &sid, "idle"); }).await;
+                    }
+                    // Tool-execution diagnostics: log each tool start/end so the
+                    // terminal shows what ran and whether it failed. The bash tool
+                    // returns "Working directory does not exist" as its result text
+                    // when cwd is invalid, so surfacing results here pinpoints the
+                    // failure without digging through JSONL files.
+                    if et == "tool_execution_start" {
+                        eprintln!(
+                            "[TOOL] start sid={} id={} name={}",
+                            sid,
+                            data.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or(""),
+                            data.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
+                        );
+                    } else if et == "tool_execution_end" {
+                        let is_error = data.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let result_str = data
+                            .get("result")
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            .unwrap_or_else(|| data.get("result").map(|v| v.to_string()).unwrap_or_default());
+                        let snippet: String = result_str.chars().take(160).collect();
+                        eprintln!(
+                            "[TOOL] end   sid={} id={} name={} is_error={} result={:?}",
+                            sid,
+                            data.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or(""),
+                            data.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
+                            is_error,
+                            snippet,
+                        );
                     }
                     let _ = app.emit("agent-event", FrontendEvent { event_type: et, session_id: sid, data });
                 })
@@ -442,6 +613,7 @@ impl Store {
                 archived_at: None,
                 config: None,
                 thinking_level: None,
+                cwd: None,
             });
             s.selected_session_id = sid.clone();
         }).await;
@@ -460,6 +632,34 @@ impl Store {
                         store.mutate(&app, |s| { set_sess_status(s, &sid, "running"); }).await;
                     } else if et == "agent_end" || et == "turn_end" {
                         store.mutate(&app, |s| { set_sess_status(s, &sid, "idle"); }).await;
+                    }
+                    // Tool-execution diagnostics: log each tool start/end so the
+                    // terminal shows what ran and whether it failed. The bash tool
+                    // returns "Working directory does not exist" as its result text
+                    // when cwd is invalid, so surfacing results here pinpoints the
+                    // failure without digging through JSONL files.
+                    if et == "tool_execution_start" {
+                        eprintln!(
+                            "[TOOL] start sid={} id={} name={}",
+                            sid,
+                            data.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or(""),
+                            data.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
+                        );
+                    } else if et == "tool_execution_end" {
+                        let is_error = data.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let result_str = data
+                            .get("result")
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            .unwrap_or_else(|| data.get("result").map(|v| v.to_string()).unwrap_or_default());
+                        let snippet: String = result_str.chars().take(160).collect();
+                        eprintln!(
+                            "[TOOL] end   sid={} id={} name={} is_error={} result={:?}",
+                            sid,
+                            data.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or(""),
+                            data.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?"),
+                            is_error,
+                            snippet,
+                        );
                     }
                     let _ = app.emit("agent-event", FrontendEvent { event_type: et, session_id: sid, data });
                 })
@@ -511,21 +711,7 @@ impl Store {
             // Emit transcript with captured sid2 (not state.selected_session_id)
             // so the frontend gets the right transcript even after a session switch.
             let msgs2 = s.get_messages().await;
-            let transcript: Vec<serde_json::Value> = msgs2.iter().filter_map(|msg| {
-                let (role, content, ts) = match msg {
-                    AgentMessage::User { content, timestamp } => ("user", content, *timestamp),
-                    AgentMessage::Assistant { content, timestamp, .. } => ("assistant", content, *timestamp),
-                    _ => return None,
-                };
-                let text: String = content.iter()
-                    .filter_map(|b| if let pi_agent_core::pi_ai_types::ContentBlock::Text { text, .. } = b { Some(text.clone()) } else { None })
-                    .collect();
-                let ts_secs = ts as f64 / 1000.0;
-                let created = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
-                    .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-                    .unwrap_or_else(now_iso);
-                Some(json!({"id": format!("msg-{}", ts), "kind": "message", "role": role, "text": text, "createdAt": created}))
-            }).collect();
+            let transcript = build_display_transcript(&msgs2);
             if !transcript.is_empty() {
                 let payload = json!({"sessionId": sid2, "transcript": transcript});
                 let _ = a.emit("pi-gui:selected-transcript-changed", &payload);
@@ -543,24 +729,158 @@ impl Store {
         let (sid, cwd, session_file) = {
             let state = self.state.lock().await;
             let sid = state.selected_session_id.clone();
-            let cwd = std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| {
-                    std::env::var("HOME")
-                        .map(|h| format!("{}/.pi-rs", h))
-                        .unwrap_or_else(|_| "/tmp".into())
-                });
+            let sess_cwd = state
+                .sessions
+                .iter()
+                .find(|s| s.id == sid)
+                .and_then(|s| s.cwd.as_deref());
+            let cwd = resolve_session_cwd(sess_cwd);
             let file = state.sessions.iter()
                 .find(|s| s.id == sid)
                 .and_then(|s| s.session_file.as_ref().filter(|f| !f.is_empty()))
                 .cloned();
+            let cwd_exists = std::path::Path::new(&cwd).exists();
+            eprintln!(
+                "[CWD] ensure_session sid={} session_record_cwd={:?} resolved_cwd={:?} exists={} session_file={:?}",
+                sid, sess_cwd, cwd, cwd_exists, file
+            );
+            if !cwd_exists {
+                eprintln!("[CWD] WARNING resolved cwd does not exist — bash tool will fail with \"Working directory does not exist\"");
+            }
             (sid, cwd, file)
         };
         if sid.is_empty() {
             return Err("No active session".into());
         }
-        self.init_session(app, &cwd, &sid, session_file).await
+        self.init_session(app, &cwd, &sid, session_file, None).await
+    }
+
+    /// Set the working directory for a session. If the session is already
+    /// initialized (has a session file with history), fork a new session with
+    /// the new cwd (history is copied by pi-rs via `fork_from`). The original
+    /// session is left untouched.
+    pub async fn set_session_cwd(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        session_id: &str,
+        path: &str,
+    ) -> Result<DesktopState, String> {
+        // Validate the path exists and is a directory.
+        let p = std::path::PathBuf::from(path);
+        if !p.is_dir() {
+            return Err(format!("Working directory does not exist or is not a directory: {}", path));
+        }
+        let new_cwd = p.to_string_lossy().to_string();
+
+        // Read the current session record (without holding the lock across init).
+        let (current_file, current_cwd, title) = {
+            let state = self.state.lock().await;
+            let sess = state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .ok_or_else(|| "Session not found".to_string())?;
+            (
+                sess.session_file.clone().filter(|f| !f.is_empty()),
+                sess.cwd.clone(),
+                sess.title.clone(),
+            )
+        };
+
+        let action = decide_cwd_action(
+            current_file.as_deref(),
+            &new_cwd,
+            current_cwd.as_deref(),
+        );
+        eprintln!(
+            "[CWD] set_session_cwd sid={} new_cwd={:?} current_cwd={:?} session_file={:?} action={:?}",
+            session_id, new_cwd, current_cwd, current_file, action
+        );
+
+        match action {
+            CwdAction::NoOp => Ok(self.state.lock().await.clone()),
+            CwdAction::SetInPlace => {
+                let sid = session_id.to_string();
+                let cwd = new_cwd.clone();
+                Ok(self
+                    .mutate(app, |s| {
+                        if let Some(sess) = s.sessions.iter_mut().find(|s| s.id == sid) {
+                            sess.cwd = Some(cwd.clone());
+                        }
+                    })
+                    .await)
+            }
+            CwdAction::Fork => {
+                let new_id = format!("sess-{}", chrono::Utc::now().timestamp_millis());
+                let cwd_for_record = new_cwd.clone();
+                let title2 = title.clone();
+                // Push the new session record and select it.
+                self.mutate(app, |s| {
+                    s.sessions.push(SessionRecord {
+                        id: new_id.clone(),
+                        title: if title2.is_empty() {
+                            "New thread".to_string()
+                        } else {
+                            title2.clone()
+                        },
+                        updated_at: now_iso(),
+                        preview: String::new(),
+                        status: "idle".to_string(),
+                        has_unseen_update: false,
+                        session_file: None,
+                        archived_at: None,
+                        config: None,
+                        thinking_level: None,
+                        cwd: Some(cwd_for_record.clone()),
+                    });
+                    s.selected_session_id = new_id.clone();
+                })
+                .await;
+                // Initialize the new session by forking from the old one.
+                // pi-rs copies the history into a new session file under the new cwd.
+                let old_file = current_file.clone().unwrap_or_default();
+                match self
+                    .init_session(
+                        app,
+                        &new_cwd,
+                        &new_id,
+                        None,
+                        if old_file.is_empty() { None } else { Some(old_file) },
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        // Verify pi-rs backfilled session_file onto the new record.
+                        let state = self.state.lock().await;
+                        let file_set = state
+                            .sessions
+                            .iter()
+                            .any(|s| s.id == new_id && s.session_file.is_some());
+                        if !file_set {
+                            drop(state);
+                            let old_sid = session_id.to_string();
+                            self.mutate(app, |s| {
+                                s.sessions.retain(|s| s.id != new_id);
+                                s.selected_session_id = old_sid.clone();
+                            })
+                            .await;
+                            return Err("Failed to persist session file for forked session".into());
+                        }
+                        Ok(state.clone())
+                    }
+                    Err(e) => {
+                        // Roll back: drop the new record and restore selection.
+                        let old_sid = session_id.to_string();
+                        self.mutate(app, |s| {
+                            s.sessions.retain(|s| s.id != new_id);
+                            s.selected_session_id = old_sid.clone();
+                        })
+                        .await;
+                        Err(e)
+                    }
+                }
+            }
+        }
     }
 
     pub async fn abort(&self) {

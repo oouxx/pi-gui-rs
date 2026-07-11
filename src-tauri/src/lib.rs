@@ -4,6 +4,7 @@ mod commands;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state::Store::new_with_runtime())
         .invoke_handler(tauri::generate_handler![
             commands::ping,
@@ -12,6 +13,7 @@ pub fn run() {
             commands::create_session,
             commands::archive_session,
             commands::rename_session,
+            commands::set_session_cwd,
             commands::submit_composer,
             commands::cancel_current_run,
             commands::set_active_view,

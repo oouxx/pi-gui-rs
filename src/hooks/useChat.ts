@@ -37,6 +37,7 @@ interface SessionItem {
   title: string;
   updatedAt: string;
   status: string;
+  cwd?: string | null;
 }
 
 /** Extract text from an assistant message's content blocks. */
@@ -57,6 +58,11 @@ function toBlocks(raw: any[] | undefined | null): ContentBlock[] {
     if (b.id !== undefined) block.id = b.id;
     if (b.name !== undefined) block.name = b.name;
     if (b.arguments !== undefined) block.arguments = b.arguments;
+    // Frontend-only execution state (present in transcript reloads where the
+    // backend merges tool results onto toolCall blocks).
+    if (b.status !== undefined) block.status = b.status;
+    if (b.result !== undefined) block.result = b.result;
+    if (b.isError !== undefined) block.isError = b.isError;
     return block;
   });
 }
@@ -94,6 +100,7 @@ export function useChat() {
             title: s.title || "Untitled",
             updatedAt: s.updatedAt,
             status: s.status,
+            cwd: s.cwd ?? null,
           })),
       );
       if (state.selectedSessionId && state.selectedSessionId !== activeSessionIdRef.current) {
@@ -122,8 +129,15 @@ export function useChat() {
         const et = evt.event_type;
 
         if (et === "message_start") {
-          // New assistant message with initial content blocks
-          const rawBlocks = evt.data?.message?.content;
+          // New assistant message with initial content blocks.
+          // NOTE: pi-rs also emits MessageStart for user prompts and tool
+          // results (agent_loop.rs), so we must only render assistant ones —
+          // otherwise the user's input gets echoed as an assistant bubble.
+          // User input is added optimistically on send; tool results are
+          // merged onto their toolCall block via tool_execution_* events.
+          const msg = evt.data?.message;
+          if (!msg || msg.role !== "assistant") return;
+          const rawBlocks = msg.content;
           const blocks = toBlocks(rawBlocks);
           const text = extractText(rawBlocks);
           const newMsg: DisplayMessage = {
@@ -151,8 +165,12 @@ export function useChat() {
           });
 
         } else if (et === "message_end") {
-          // Finalize the last assistant message
-          const rawBlocks = evt.data?.message?.content;
+          // Finalize the last assistant message.
+          // As with message_start, ignore non-assistant messages (user prompts
+          // and tool results) — they would otherwise overwrite real content.
+          const msg = evt.data?.message;
+          if (!msg || msg.role !== "assistant") return;
+          const rawBlocks = msg.content;
           if (!rawBlocks) return;
           const blocks = toBlocks(rawBlocks);
           setMessages((prev) => {
@@ -329,9 +347,13 @@ export function useChat() {
     }
   }, [sessions]);
 
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const activeSessionCwd = activeSession?.cwd ?? null;
+
   return {
     sessions,
     activeSessionId,
+    activeSessionCwd,
     selectSession,
     createSession,
     deleteSession,
@@ -345,12 +367,20 @@ export function useChat() {
 
 function transcriptToDisplay(transcript: readonly any[]): DisplayMessage[] {
   return transcript
-    .filter((t: any) => t.kind === "message" || (t.role && t.text))
-    .map((t: any) => ({
-      id: t.id ?? `msg-${Math.random().toString(36).slice(2, 8)}`,
-      role: t.role === "user" ? ("user" as const) : ("assistant" as const),
-      content: t.text ?? t.content ?? "",
-      blocks: [{ type: "text" as const, text: t.text ?? t.content ?? "" }],
-      createdAt: t.createdAt ?? "",
-    }));
+    .filter((t: any) => t.kind === "message" || t.role)
+    .map((t: any) => {
+      // Prefer structured content blocks from the backend (text/thinking/toolCall
+      // with merged tool execution state); fall back to flattened text.
+      const rawBlocks = Array.isArray(t.content) ? t.content : null;
+      const blocks: ContentBlock[] = rawBlocks && rawBlocks.length > 0
+        ? toBlocks(rawBlocks)
+        : [{ type: "text" as const, text: t.text ?? "" }];
+      return {
+        id: t.id ?? `msg-${Math.random().toString(36).slice(2, 8)}`,
+        role: t.role === "user" ? ("user" as const) : ("assistant" as const),
+        content: t.text ?? blocksToText(blocks) ?? "",
+        blocks,
+        createdAt: t.createdAt ?? "",
+      };
+    });
 }
