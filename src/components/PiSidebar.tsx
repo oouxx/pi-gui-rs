@@ -7,10 +7,6 @@ import {
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-  DialogFooter, DialogClose,
-} from "@/components/ui/dialog"
 import { Search, Settings, Puzzle, Code2, Plus, Trash2, Pencil, Copy, Check } from "lucide-react"
 import { useChat } from "@/hooks/useChat"
 import { renameSession } from "@/api/commands"
@@ -24,7 +20,6 @@ interface PiSidebarProps {
 export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
   const { sessions, activeSessionId, selectSession, createSession, deleteSession, loading } = useChat()
   const [search, setSearch] = useState("")
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -42,7 +37,6 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
 
   const handleDelete = useCallback(async (sessionId: string) => {
     await deleteSession(sessionId)
-    setConfirmDeleteId(null)
   }, [deleteSession])
 
   const commitRename = useCallback((id: string, value: string, original: string) => {
@@ -150,7 +144,7 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
                         )}
                         <button
                           className="text-muted-foreground hover:text-destructive absolute top-1/2 right-1.5 z-10 -translate-y-1/2 opacity-0 transition-opacity group-hover/item:opacity-100"
-                          onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(s.id) }}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(s.id) }}
                           title="Delete permanently"
                         >
                           <Trash2 className="size-3" />
@@ -188,28 +182,6 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
-
-      <Dialog open={!!confirmDeleteId} onOpenChange={(open) => { if (!open) setConfirmDeleteId(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete session permanently?</DialogTitle>
-            <DialogDescription>
-              This action cannot be undone. The session file will be permanently removed from disk.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 border bg-background hover:bg-accent">
-              Cancel
-            </DialogClose>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { if (confirmDeleteId) handleDelete(confirmDeleteId) }}
-            >
-              Delete
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Sidebar>
   )
 }
