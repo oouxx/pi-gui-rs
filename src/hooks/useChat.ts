@@ -37,6 +37,7 @@ interface SessionItem {
   title: string;
   updatedAt: string;
   status: string;
+  cwd?: string | null;
 }
 
 /** Extract text from an assistant message's content blocks. */
@@ -99,6 +100,7 @@ export function useChat() {
             title: s.title || "Untitled",
             updatedAt: s.updatedAt,
             status: s.status,
+            cwd: s.cwd ?? null,
           })),
       );
       if (state.selectedSessionId && state.selectedSessionId !== activeSessionIdRef.current) {
@@ -345,9 +347,13 @@ export function useChat() {
     }
   }, [sessions]);
 
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const activeSessionCwd = activeSession?.cwd ?? null;
+
   return {
     sessions,
     activeSessionId,
+    activeSessionCwd,
     selectSession,
     createSession,
     deleteSession,

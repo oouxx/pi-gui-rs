@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Send } from "lucide-react"
+import { Send, Folder } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
@@ -19,6 +19,8 @@ import {
 import { useChat, type ContentBlock } from "@/hooks/useChat"
 import ToolCallCard from "@/components/ToolCallCard"
 import ThinkingBlock from "@/components/ThinkingBlock"
+import { open as openDialog } from "@tauri-apps/plugin-dialog"
+import { setSessionCwd } from "@/api/commands"
 
 const mdComponents: Components = {
   code: ({ className, children, ...props }) => {
@@ -113,7 +115,7 @@ function BlockRenderer({ block, isStreaming }: { block: ContentBlock; isStreamin
 }
 
 export default function ChatView() {
-  const { messages, sendMessage, streaming, loading } = useChat()
+  const { messages, sendMessage, streaming, loading, activeSessionId, activeSessionCwd } = useChat()
   const [input, setInput] = useState("")
   const [showSlash, setShowSlash] = useState(false)
   const [showMention, setShowMention] = useState(false)
@@ -192,6 +194,17 @@ export default function ChatView() {
     prevInputRef.current = ""
     await sendMessage(text)
   }, [input, streaming, sendMessage])
+
+  const handlePickFolder = useCallback(async () => {
+    if (!activeSessionId) return
+    const selected = await openDialog({ directory: true, multiple: false })
+    if (typeof selected !== "string" || !selected) return
+    try {
+      await setSessionCwd(activeSessionId, selected)
+    } catch (e) {
+      console.error("[setSessionCwd]", e)
+    }
+  }, [activeSessionId])
 
   const onInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -336,6 +349,23 @@ export default function ChatView() {
           </Command>
         </CommandDialog>
 
+        {/* Working directory picker */}
+        <div className="border-hairline bg-bg-surface flex-shrink-0 border-t px-4 pt-2">
+          <button
+            type="button"
+            onClick={handlePickFolder}
+            disabled={!activeSessionId}
+            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors disabled:opacity-50"
+            title={activeSessionCwd ?? "选择工作目录"}
+          >
+            <Folder className="size-3.5" />
+            <span className="max-w-[260px] truncate">
+              {activeSessionCwd
+                ? activeSessionCwd.split("/").filter(Boolean).pop() ?? activeSessionCwd
+                : "选择工作目录"}
+            </span>
+          </button>
+        </div>
         {/* Composer */}
         <div className="border-hairline bg-bg-surface flex-shrink-0 border-t px-4 py-2">
           <div className="relative mx-auto max-w-[820px]">
