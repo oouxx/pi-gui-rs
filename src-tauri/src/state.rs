@@ -70,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decide_cwd_set_in_place_when_has_file_but_no_current_cwd() {
+    fn test_decide_cwd_fork_when_has_file_but_no_current_cwd() {
         // 已有 session_file 但从未记录过 cwd（旧会话）：视为需要 fork 以带上历史
         let a = decide_cwd_action(Some("/old/sess.jsonl"), "/new/work", None);
         assert!(matches!(a, CwdAction::Fork));

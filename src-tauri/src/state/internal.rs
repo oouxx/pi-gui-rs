@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use pi_agent_core::pi_ai_types::ContentBlock;
 use pi_agent_core::types::{AgentEvent, AgentMessage};
 use pi_coding_agent::core::agent_session::AgentSession;
 use pi_coding_agent::core::sdk::{create_agent_session, CreateAgentSessionOptions};
@@ -230,8 +231,6 @@ pub fn serialize_event(event: &AgentEvent) -> (String, serde_json::Value) {
 /// the frontend can render `ToolCallCard` with `status`/`result`/`isError`
 /// both after a turn completes and on session reload.
 pub fn build_display_transcript(msgs: &[AgentMessage]) -> Vec<serde_json::Value> {
-    use pi_agent_core::pi_ai_types::ContentBlock;
-
     // First pass: collect tool results keyed by tool_call_id.
     let mut tool_results: std::collections::HashMap<String, (String, bool)> =
         std::collections::HashMap::new();
@@ -705,7 +704,7 @@ impl Store {
                 .find(|s| s.id == session_id)
                 .ok_or_else(|| "Session not found".to_string())?;
             (
-                sess.session_file.clone(),
+                sess.session_file.clone().filter(|f| !f.is_empty()),
                 sess.cwd.clone(),
                 sess.title.clone(),
             )
@@ -769,7 +768,25 @@ impl Store {
                     )
                     .await
                 {
-                    Ok(()) => Ok(self.state.lock().await.clone()),
+                    Ok(()) => {
+                        // Verify pi-rs backfilled session_file onto the new record.
+                        let state = self.state.lock().await;
+                        let file_set = state
+                            .sessions
+                            .iter()
+                            .any(|s| s.id == new_id && s.session_file.is_some());
+                        if !file_set {
+                            drop(state);
+                            let old_sid = session_id.to_string();
+                            self.mutate(app, |s| {
+                                s.sessions.retain(|s| s.id != new_id);
+                                s.selected_session_id = old_sid.clone();
+                            })
+                            .await;
+                            return Err("Failed to persist session file for forked session".into());
+                        }
+                        Ok(state.clone())
+                    }
                     Err(e) => {
                         // Roll back: drop the new record and restore selection.
                         let old_sid = session_id.to_string();
