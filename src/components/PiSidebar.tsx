@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Input } from "@/components/ui/input"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup,
@@ -6,14 +6,14 @@ import {
 } from "@/components/ui/sidebar"
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
-  ContextMenuSeparator,
 } from "@/components/ui/context-menu"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
   DialogFooter, DialogClose,
 } from "@/components/ui/dialog"
-import { Search, Settings, Puzzle, Code2, Plus, Trash2, Archive } from "lucide-react"
+import { Search, Settings, Puzzle, Code2, Plus, Trash2, Pencil, Copy, Check } from "lucide-react"
 import { useChat } from "@/hooks/useChat"
+import { renameSession } from "@/api/commands"
 import type { AppView } from "./AppShell"
 
 interface PiSidebarProps {
@@ -22,9 +22,18 @@ interface PiSidebarProps {
 }
 
 export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
-  const { sessions, activeSessionId, selectSession, createSession, deleteSession, archiveSession, loading } = useChat()
+  const { sessions, activeSessionId, selectSession, createSession, deleteSession, loading } = useChat()
   const [search, setSearch] = useState("")
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear any pending copy-feedback timer on unmount.
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+  }, [])
 
   const matches = (s: { title: string }) =>
     !search.trim() || s.title.toLowerCase().includes(search.trim().toLowerCase())
@@ -36,9 +45,25 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
     setConfirmDeleteId(null)
   }, [deleteSession])
 
-  const handleArchive = useCallback(async (sessionId: string) => {
-    await archiveSession(sessionId)
-  }, [archiveSession])
+  const commitRename = useCallback((id: string, value: string, original: string) => {
+    setRenamingId(null)
+    const trimmed = value.trim()
+    if (trimmed && trimmed !== original) {
+      renameSession(id, trimmed).catch(() => {})
+    }
+  }, [])
+
+  const handleStartRename = useCallback((id: string, title: string) => {
+    setRenamingId(id)
+    setRenameValue(title)
+  }, [])
+
+  const handleCopyId = useCallback((id: string) => {
+    navigator.clipboard?.writeText(id).catch(() => {})
+    setCopiedId(id)
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => setCopiedId(null), 1200)
+  }, [])
 
   return (
     <Sidebar collapsible="icon">
@@ -99,14 +124,30 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
                   <ContextMenu>
                     <ContextMenuTrigger asChild>
                       <div className="relative flex items-center">
-                        <SidebarMenuButton
-                          isActive={activeSessionId === s.id}
-                          onClick={() => { onModeChange("chat"); selectSession(s.id); }}
-                          tooltip={s.title}
-                        >
-                          <span className={`size-1.5 flex-shrink-0 rounded-full ${activeSessionId === s.id ? "bg-accent" : "bg-muted-foreground"}`} />
-                          <span className="flex-1 truncate">{s.title}</span>
-                        </SidebarMenuButton>
+                        {renamingId === s.id ? (
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onFocus={(e) => e.currentTarget.select()}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); commitRename(s.id, renameValue, s.title) }
+                              if (e.key === "Escape") { e.preventDefault(); setRenamingId(null) }
+                            }}
+                            onBlur={() => commitRename(s.id, renameValue, s.title)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-7 flex-1 rounded-sm bg-background px-1 text-sm outline-none ring-1 ring-accent"
+                          />
+                        ) : (
+                          <SidebarMenuButton
+                            isActive={activeSessionId === s.id}
+                            onClick={() => { onModeChange("chat"); selectSession(s.id); }}
+                            tooltip={s.title}
+                          >
+                            <span className={`size-1.5 flex-shrink-0 rounded-full ${activeSessionId === s.id ? "bg-accent" : "bg-muted-foreground"}`} />
+                            <span className="flex-1 truncate">{s.title}</span>
+                          </SidebarMenuButton>
+                        )}
                         <button
                           className="text-muted-foreground hover:text-destructive absolute top-1/2 right-1.5 z-10 -translate-y-1/2 opacity-0 transition-opacity group-hover/item:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(s.id) }}
@@ -117,17 +158,13 @@ export default function PiSidebar({ mode, onModeChange }: PiSidebarProps) {
                       </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
-                      <ContextMenuItem onClick={() => handleArchive(s.id)}>
-                        <Archive className="size-3.5" />
-                        Archive
+                      <ContextMenuItem onSelect={() => handleStartRename(s.id, s.title)}>
+                        <Pencil className="size-3.5" />
+                        Rename
                       </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        variant="destructive"
-                        onClick={() => setConfirmDeleteId(s.id)}
-                      >
-                        <Trash2 className="size-3.5" />
-                        Delete permanently
+                      <ContextMenuItem onSelect={() => handleCopyId(s.id)}>
+                        {copiedId === s.id ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                        {copiedId === s.id ? "Copied!" : "Copy session ID"}
                       </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
