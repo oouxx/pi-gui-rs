@@ -27,4 +27,23 @@ mod tests {
         assert_eq!(state.active_view, "threads");
         assert!(state.global_model_settings.enabled_model_patterns.is_empty());
     }
+
+    #[test]
+    fn test_resolve_session_cwd_prefers_session_cwd() {
+        let cwd = super::internal::resolve_session_cwd(Some("/usr/local"));
+        assert_eq!(cwd, "/usr/local");
+    }
+
+    #[test]
+    fn test_resolve_session_cwd_falls_back_to_current_dir() {
+        let cwd = super::internal::resolve_session_cwd(None);
+        // None 或空字符串都应回退到 current_dir，不应是空串
+        assert!(!cwd.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_session_cwd_empty_string_falls_back() {
+        let cwd = super::internal::resolve_session_cwd(Some(""));
+        assert!(!cwd.is_empty());
+    }
 }

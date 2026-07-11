@@ -74,6 +74,8 @@ pub struct SessionRecord {
     pub config: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +121,24 @@ pub struct FrontendEvent {
     pub event_type: String,
     pub session_id: String,
     pub data: serde_json::Value,
+}
+
+/// Resolve the working directory for a session: prefer the session's stored
+/// cwd (when non-empty), else fall back to the process current directory,
+/// then `$HOME/.pi-rs`, then `/tmp`. Matches the previous `ensure_session`
+/// fallback chain.
+pub fn resolve_session_cwd(session_cwd: Option<&str>) -> String {
+    if let Some(c) = session_cwd.filter(|s| !s.is_empty()) {
+        return c.to_string();
+    }
+    std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            std::env::var("HOME")
+                .map(|h| format!("{}/.pi-rs", h))
+                .unwrap_or_else(|_| "/tmp".into())
+        })
 }
 
 pub fn now_iso() -> String {
@@ -525,6 +545,7 @@ impl Store {
                 archived_at: None,
                 config: None,
                 thinking_level: None,
+                cwd: None,
             });
             s.selected_session_id = sid.clone();
         }).await;

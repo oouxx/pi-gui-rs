@@ -79,6 +79,7 @@ pub fn scan_existing_sessions() -> Vec<SessionRecord> {
             archived_at: None,
             config: None,
             thinking_level: None,
+            cwd: None,
         }
     }).collect()
 }
@@ -238,6 +239,7 @@ pub fn create_session_simple(state: &mut DesktopState, title: &str) {
         archived_at: None,
         config: None,
         thinking_level: None,
+        cwd: None,
     });
     state.selected_session_id = id;
 }
