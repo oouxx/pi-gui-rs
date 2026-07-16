@@ -1,6 +1,6 @@
 //! The Store struct — central state manager for the Tauri backend.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use pi_agent_core::types::{AgentEvent, AgentMessage};
@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use super::cwd::{decide_cwd_action, resolve_session_cwd, CwdAction};
+use super::session;
 use super::transcript::{build_display_transcript, serialize_event};
 use super::types::{DesktopState, FrontendEvent, GlobalModelSettings, SessionRecord};
 use super::ui;
@@ -61,6 +62,10 @@ pub struct Store {
     pub is_streaming: AtomicBool,
     /// Abort signal that works even when the AgentSession is moved into a tokio task.
     pub abort_flag: Arc<AtomicBool>,
+    /// Generation counter incremented on each session switch. The spawned
+    /// send_message task checks this before putting the runtime back, so a
+    /// stale task from a previous session doesn't overwrite the new runtime.
+    pub generation: AtomicU64,
 }
 
 impl Store {
@@ -71,6 +76,7 @@ impl Store {
             session_id: Mutex::new(None),
             is_streaming: AtomicBool::new(false),
             abort_flag: Arc::new(AtomicBool::new(false)),
+            generation: AtomicU64::new(0),
         })
     }
 
@@ -339,6 +345,78 @@ impl Store {
         Ok(())
     }
 
+    /// Select a session: abort current streaming, discard old runtime, and
+    /// initialize a new runtime for the selected session (loading its session
+    /// file if one exists on disk).
+    pub async fn select_session(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        session_id: &str,
+    ) -> Result<DesktopState, String> {
+        // 1. Bump generation so any in-flight send_message task won't
+        //    overwrite our new runtime with the old one.
+        self.generation.fetch_add(1, Ordering::SeqCst);
+
+        // 2. Abort any current streaming
+        self.abort().await;
+
+        // 3. Discard old runtime
+        *self.runtime.lock().await = None;
+
+        // 4. Update state (selected_session_id)
+        let state = self
+            .mutate(app, |s| {
+                session::select_session_by_id(s, session_id);
+            })
+            .await;
+
+        // 5. Read session info for runtime init (cwd + session_file)
+        let (cwd, session_file) = {
+            let state_lock = self.state.lock().await;
+            let sess = state_lock.sessions.iter().find(|s| s.id == session_id);
+            match sess {
+                Some(s) => (
+                    resolve_session_cwd(s.cwd.as_deref()),
+                    s.session_file.clone().filter(|f| !f.is_empty()),
+                ),
+                None => return Ok(state),
+            }
+        };
+
+        // 6. Initialize a new runtime for the selected session
+        let agent_dir = pi_coding_agent::config::get_agent_dir()
+            .to_string_lossy()
+            .to_string();
+        let session_dir =
+            pi_coding_agent::core::session_manager::SessionManager::default_session_dir(
+                &cwd, &agent_dir,
+            );
+        let session_manager = pi_coding_agent::core::session_manager::SessionManager::new(
+            &cwd,
+            &session_dir,
+            session_file.as_deref(),
+            true,
+            None,
+        );
+
+        let factory = self.build_runtime_factory(app);
+        let runtime = create_agent_session_runtime(
+            factory,
+            CreateAgentSessionRuntimeParams {
+                cwd: cwd.clone(),
+                agent_dir,
+                session_manager,
+            },
+        )
+        .await;
+
+        let sid = runtime.session().get_session_id();
+        *self.session_id.lock().await = Some(sid.clone());
+        *self.runtime.lock().await = Some(runtime);
+
+        Ok(self.state.lock().await.clone())
+    }
+
     pub async fn send_message(self: &Arc<Self>, app: &AppHandle, text: &str) -> Result<(), String> {
         // Lazily init runtime if not yet created
         if self.runtime.lock().await.is_none() {
@@ -363,6 +441,7 @@ impl Store {
         let t = text.to_string();
         let sid2 = sid.clone();
         let abort = self.abort_flag.clone();
+        let gen = self.generation.load(Ordering::SeqCst);
         let _ = app.emit(
             "agent-event",
             FrontendEvent {
@@ -403,8 +482,13 @@ impl Store {
                 }
             }
             eprintln!("[LLM] add_user_text done");
-            // Put runtime back regardless of outcome
-            *s.runtime.lock().await = Some(runtime);
+            // Only put the runtime back if the generation hasn't changed
+            // (i.e. no session switch happened while we were streaming).
+            if s.generation.load(Ordering::SeqCst) == gen {
+                *s.runtime.lock().await = Some(runtime);
+            } else {
+                eprintln!("[LLM] generation changed — discarding stale runtime");
+            }
             s.is_streaming.store(false, Ordering::SeqCst);
             // Emit transcript with captured sid2 (not state.selected_session_id)
             // so the frontend gets the right transcript even after a session switch.

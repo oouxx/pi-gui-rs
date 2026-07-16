@@ -122,25 +122,17 @@ export default function ChatView() {
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionFiles, setMentionFiles] = useState<{ path: string }[]>([])
   const [mentionStart, setMentionStart] = useState(-1)
-  const msgContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const prevInputRef = useRef("")
 
-  // Auto-scroll to bottom when switching sessions or when messages change.
-  // A ResizeObserver catches async content (markdown/images) that settles after
-  // the initial commit, which a plain useEffect would miss.
-  useEffect(() => {
-    const el = msgContainerRef.current
+  // Scroll to bottom when switching sessions. The `key` on the container forces
+  // a re-mount, and the ref callback runs after the DOM is committed.
+  const scrollRef = useCallback((el: HTMLDivElement | null) => {
     if (!el) return
-    const scrollToBottom = () => {
+    requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight
-    }
-    scrollToBottom()
-    const ro = new ResizeObserver(scrollToBottom)
-    ro.observe(el)
-    for (const child of el.children) ro.observe(child)
-    return () => ro.disconnect()
-  }, [activeSessionId, messages])
+    })
+  }, [])
 
   // @ mention file search (stub — no workspace file listing)
   useEffect(() => {
@@ -254,7 +246,8 @@ export default function ChatView() {
       {/* Messages or empty state */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          ref={msgContainerRef}
+          key={activeSessionId}
+          ref={scrollRef}
           className="flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-5"
         >
           {isEmpty ? (

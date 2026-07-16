@@ -25,9 +25,7 @@ pub async fn select_session(
     store: State<'_, Arc<Store>>,
     session_id: String,
 ) -> Result<DesktopState, String> {
-    Ok(store
-        .mutate(&app, |s| session::select_session_by_id(s, &session_id))
-        .await)
+    store.select_session(&app, &session_id).await
 }
 
 #[tauri::command]
